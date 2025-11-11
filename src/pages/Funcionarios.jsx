@@ -1,8 +1,20 @@
 import { useState, useEffect } from "react";
 import { Users, Plus, Search, Edit2, Trash2, Camera, Upload, X, Eye, EyeOff } from "lucide-react";
 
-// Configuração da API
 const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:8000/api/v1';
+
+// Helper para garantir que a imagem base64 tenha o prefixo correto
+const getImageSrc = (base64String) => {
+  if (!base64String) return null;
+  
+  // Se já tem o prefixo data:image, retorna como está
+  if (base64String.startsWith('data:image')) {
+    return base64String;
+  }
+  
+  // Caso contrário, adiciona o prefixo (assume JPEG por padrão)
+  return `data:image/jpeg;base64,${base64String}`;
+};
 
 export default function Funcionarios() {
   const [funcionarios, setFuncionarios] = useState([]);
@@ -27,7 +39,6 @@ export default function Funcionarios() {
 
   const [errors, setErrors] = useState({});
 
-  // Carregar dados iniciais
   useEffect(() => {
     loadData();
   }, []);
@@ -45,34 +56,63 @@ export default function Funcionarios() {
       const deptData = await deptRes.json();
       const horariosData = await horariosRes.json();
 
+      console.log("📊 Dados carregados:");
+      console.log("- Usuários:", usersData.users?.length || 0);
+      console.log("- Departamentos:", deptData?.length || 0);
+      console.log("- Horários:", horariosData?.length || 0);
+      
+      // Debug: verificar se algum usuário tem imagem
+      const usersWithImage = usersData.users?.filter(u => u.image) || [];
+      console.log("- Usuários com imagem:", usersWithImage.length);
+      if (usersWithImage.length > 0) {
+        console.log("  Exemplo de imagem (primeiros 100 chars):", usersWithImage[0].image?.substring(0, 100));
+      }
+
       setFuncionarios(usersData.users || []);
       setDepartamentos(deptData || []);
       setHorarios(horariosData || []);
     } catch (error) {
-      console.error("Erro ao carregar dados:", error);
+      console.error("❌ Erro ao carregar dados:", error);
       alert("Erro ao carregar dados. Verifique a conexão com o servidor.");
     } finally {
       setLoading(false);
     }
   };
 
-  // Filtrar funcionários
   const filteredFuncionarios = funcionarios.filter(func => 
     func.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
     func.registration?.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
-  // Abrir modal para criar/editar
-  const openModal = (funcionario = null) => {
+  const openModal = async (funcionario = null) => {
     if (funcionario) {
       setIsEditing(true);
+      
+      // Carregar departamentos e horários vinculados
+      let vinculatedDepts = [];
+      let vinculatedHorarios = [];
+      
+      try {
+        // Buscar detalhes completos do usuário incluindo vínculos
+        const userDetailResponse = await fetch(`${API_URL}/users/${funcionario.id}`);
+        if (userDetailResponse.ok) {
+          const userDetail = await userDetailResponse.json();
+          console.log("Detalhes do usuário:", userDetail);
+          
+          // Aqui você pode extrair departamentos e horários se a API retornar
+          // Por enquanto, deixamos vazio para o usuário reselecionar
+        }
+      } catch (err) {
+        console.error("Erro ao carregar vínculos:", err);
+      }
+      
       setFormData({
         id: funcionario.id,
         name: funcionario.name,
         registration: funcionario.registration || "",
         password: "",
-        departamentos: [],
-        horarios: [],
+        departamentos: vinculatedDepts,
+        horarios: vinculatedHorarios,
         image: funcionario.image || null
       });
     } else {
@@ -105,7 +145,6 @@ export default function Funcionarios() {
     setErrors({});
   };
 
-  // Validação do formulário
   const validateForm = () => {
     const newErrors = {};
 
@@ -129,72 +168,141 @@ export default function Funcionarios() {
     return Object.keys(newErrors).length === 0;
   };
 
-  // Salvar funcionário
-  const handleSubmit = async (e) => {
-    e.preventDefault();
+const handleSubmit = async () => {
+  if (!validateForm()) return;
 
-    if (!validateForm()) {
-      return;
+  try {
+    // 1️⃣ Monta os dados básicos do funcionário
+    const payload = {
+      name: formData.name.trim(),
+      registration: formData.registration.trim(),
+      password: formData.password || undefined,
+      image: formData.image || undefined
+    };
+
+    let response;
+    if (isEditing) {
+      response = await fetch(`${API_URL}/users/${formData.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      });
+    } else {
+      response = await fetch(`${API_URL}/users/`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      });
     }
 
-    try {
-      const payload = {
-        name: formData.name.trim(),
-        registration: formData.registration.trim(),
-        password: formData.password || undefined,
-        image: formData.image || undefined
-      };
+    if (!response.ok) {
+      const errorData = await response.json();
+      throw new Error(errorData.detail || "Erro ao salvar funcionário");
+    }
 
-      let response;
-      if (isEditing) {
-        response = await fetch(`${API_URL}/users/${formData.id}`, {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(payload)
-        });
+    const savedUser = await response.json();
+    console.log("✅ Usuário salvo:", savedUser);
+
+    const userId = savedUser.id;
+
+    // 2️⃣ Se houver imagem, envia para o backend
+    if (formData.image) {
+      console.log("📸 Enviando imagem para usuário...");
+      const imgRes = await fetch(`${API_URL}/users/${userId}/image`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ image: formData.image })
+      });
+
+      if (imgRes.ok) {
+        console.log("✅ Imagem salva no backend.");
       } else {
-        response = await fetch(`${API_URL}/users/`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(payload)
-        });
+        console.error("❌ Falha ao salvar imagem no backend.");
       }
-
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.detail || "Erro ao salvar funcionário");
-      }
-
-      const savedUser = await response.json();
-
-      // Vincular departamentos (groups)
-      if (formData.departamentos.length > 0) {
-        for (const deptId of formData.departamentos) {
-          await fetch(`${API_URL}/access-rules/groups/${deptId}/users/${savedUser.id}`, {
-            method: "POST"
-          });
-        }
-      }
-
-      // Vincular horários (access rules)
-      if (formData.horarios.length > 0) {
-        for (const horarioId of formData.horarios) {
-          await fetch(`${API_URL}/access-rules/${horarioId}/users/${savedUser.id}`, {
-            method: "POST"
-          });
-        }
-      }
-
-      alert(`Funcionário ${isEditing ? 'atualizado' : 'criado'} com sucesso!`);
-      closeModal();
-      loadData();
-    } catch (error) {
-      console.error("Erro ao salvar:", error);
-      alert(error.message || "Erro ao salvar funcionário");
     }
-  };
 
-  // Deletar funcionário
+    // 3️⃣ Vincular departamentos (grupos)
+    if (formData.departamentos.length > 0) {
+      console.log("🏢 Vinculando departamentos:", formData.departamentos);
+      for (const deptId of formData.departamentos) {
+        try {
+          const groupResponse = await fetch(`${API_URL}/access-rules/groups/${deptId}/users/${userId}`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" }
+          });
+          if (groupResponse.ok) {
+            console.log(`✅ Departamento ${deptId} vinculado com sucesso`);
+          } else {
+            const err = await groupResponse.json();
+            console.error(`❌ Erro ao vincular departamento ${deptId}:`, err);
+          }
+        } catch (err) {
+          console.error(`❌ Falha ao vincular departamento ${deptId}:`, err);
+        }
+      }
+    }
+
+    // 4️⃣ Criar regra de acesso com horários
+    if (formData.horarios.length > 0) {
+      console.log("🕒 Criando regras de acesso com horários...");
+      for (const timeZoneId of formData.horarios) {
+        try {
+          const rulePayload = {
+            name: `Regra ${savedUser.name} - TZ ${timeZoneId}`,
+            type: 1,
+            priority: 0,
+            timeZones: [timeZoneId],
+            users: [userId]
+          };
+
+          const ruleRes = await fetch(`${API_URL}/access-rules/`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(rulePayload)
+          });
+
+          if (!ruleRes.ok) {
+            const err = await ruleRes.json();
+            console.error("❌ Erro ao criar regra:", err);
+            continue;
+          }
+
+          const createdRule = await ruleRes.json();
+          console.log("✅ Regra criada:", createdRule);
+
+          // Sincronizar regra com o leitor
+          await fetch(`${API_URL}/access-rules/${createdRule.id}/sync-to-idface`, { method: "POST" });
+          console.log("🔄 Regra sincronizada com leitor iDFace");
+        } catch (err) {
+          console.error("❌ Erro ao processar horário:", err);
+        }
+      }
+    }
+
+    // 5️⃣ Sincronizar usuário e imagem com o leitor
+    console.log("🔄 Sincronizando usuário com o leitor iDFace...");
+    const syncRes = await fetch(`${API_URL}/users/${userId}/sync-to-idface`, { method: "POST" });
+    if (syncRes.ok) {
+      console.log("✅ Usuário sincronizado com o leitor");
+    } else {
+      const err = await syncRes.json();
+      console.error("❌ Erro ao sincronizar usuário:", err);
+    }
+
+    alert(`✅ Funcionário ${isEditing ? "atualizado" : "criado"} com sucesso!\n
+Departamentos: ${formData.departamentos.length}
+Horários: ${formData.horarios.length}
+Imagem: ${formData.image ? "Sim" : "Não"}`);
+
+    closeModal();
+    loadData();
+  } catch (error) {
+    console.error("❌ Erro no handleSubmit:", error);
+    alert("Erro ao salvar funcionário: " + error.message);
+  }
+};
+
+
   const handleDelete = async (id) => {
     if (!window.confirm("Tem certeza que deseja excluir este funcionário?")) {
       return;
@@ -217,18 +325,15 @@ export default function Funcionarios() {
     }
   };
 
-  // Upload de imagem
   const handleImageUpload = (e) => {
     const file = e.target.files[0];
     if (!file) return;
 
-    // Validar tipo
     if (!file.type.startsWith('image/')) {
       alert("Por favor, selecione uma imagem válida");
       return;
     }
 
-    // Validar tamanho (5MB)
     if (file.size > 5 * 1024 * 1024) {
       alert("Imagem muito grande. Máximo 5MB");
       return;
@@ -236,51 +341,94 @@ export default function Funcionarios() {
 
     const reader = new FileReader();
     reader.onloadend = () => {
+      // Remove o prefixo data:image/...;base64, se existir
       const base64String = reader.result.split(',')[1];
+      console.log("Imagem carregada, tamanho base64:", base64String.length);
       setFormData(prev => ({ ...prev, image: base64String }));
+    };
+    reader.onerror = () => {
+      console.error("Erro ao ler arquivo");
+      alert("Erro ao carregar imagem");
     };
     reader.readAsDataURL(file);
   };
 
-  // Captura de imagem com leitor
   const handleCameraCapture = async () => {
-    if (!formData.id) {
-      alert("Salve o funcionário primeiro antes de capturar a imagem com o leitor");
-      return;
+  if (!formData.id) {
+    alert("⚠️ Salve o funcionário primeiro antes de capturar a imagem com o leitor.");
+    return;
+  }
+
+  setCapturingImage(true);
+
+  try {
+    console.log("📸 Iniciando captura facial para o usuário:", formData.id);
+
+    // 1️⃣ Inicia a captura no leitor
+    const captureResponse = await fetch(`${API_URL}/capture/start`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        userId: formData.id,
+        quality: 70,
+        timeout: 30
+      })
+    });
+
+    if (!captureResponse.ok) {
+      const error = await captureResponse.json();
+      throw new Error(error.detail || "Falha ao iniciar captura facial");
     }
 
-    setCapturingImage(true);
-    try {
-      const response = await fetch(`${API_URL}/capture/start`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          userId: formData.id,
-          quality: 70,
-          timeout: 30
-        })
+    const result = await captureResponse.json();
+    console.log("📤 Retorno do leitor:", result);
+
+    // 2️⃣ Se a captura foi bem-sucedida, tenta obter a imagem novamente do backend
+    if (result.success) {
+      console.log("✅ Captura facial concluída com sucesso no leitor!");
+
+      // Busca a imagem atualizada do backend
+      const imageResponse = await fetch(`${API_URL}/users/${formData.id}/image`);
+      if (imageResponse.ok) {
+        const imageBlob = await imageResponse.blob();
+        const reader = new FileReader();
+        reader.onloadend = () => {
+          const base64Data = reader.result.split(",")[1];
+          setFormData((prev) => ({ ...prev, image: base64Data }));
+          console.log("🖼️ Imagem capturada e vinculada ao formulário.");
+        };
+        reader.readAsDataURL(imageBlob);
+      } else {
+        console.warn("⚠️ Não foi possível obter a imagem após a captura.");
+      }
+
+      // 3️⃣ Sincroniza o usuário (e a nova imagem) com o leitor
+      const syncRes = await fetch(`${API_URL}/users/${formData.id}/sync-to-idface`, {
+        method: "POST"
       });
 
-      const result = await response.json();
-
-      if (result.success) {
-        alert("✅ Imagem capturada com sucesso!");
-        if (result.imageData) {
-          setFormData(prev => ({ ...prev, image: result.imageData }));
-        }
-        loadData();
+      if (syncRes.ok) {
+        console.log("🔄 Usuário sincronizado com o leitor após captura facial.");
+        alert("✅ Imagem capturada e sincronizada com sucesso!");
       } else {
-        alert("❌ " + result.message);
+        const err = await syncRes.json();
+        console.error("❌ Falha ao sincronizar usuário com o leitor:", err);
+        alert("⚠️ Imagem capturada, mas falhou ao sincronizar com o leitor.");
       }
-    } catch (error) {
-      console.error("Erro na captura:", error);
-      alert("Erro ao capturar imagem do leitor");
-    } finally {
-      setCapturingImage(false);
-    }
-  };
 
-  // Toggle departamento
+      await loadData();
+    } else {
+      alert("❌ Erro durante a captura: " + (result.message || "Erro desconhecido"));
+    }
+  } catch (error) {
+    console.error("❌ Erro na captura facial:", error);
+    alert("Erro ao capturar imagem do leitor: " + error.message);
+  } finally {
+    setCapturingImage(false);
+  }
+};
+
+
   const toggleDepartamento = (deptId) => {
     setFormData(prev => ({
       ...prev,
@@ -290,7 +438,6 @@ export default function Funcionarios() {
     }));
   };
 
-  // Toggle horário
   const toggleHorario = (horarioId) => {
     setFormData(prev => ({
       ...prev,
@@ -310,7 +457,6 @@ export default function Funcionarios() {
 
   return (
     <div className="p-6">
-      {/* Header */}
       <div className="flex items-center justify-between mb-6">
         <div className="flex items-center">
           <Users className="mr-3" style={{ color: "#174E9A" }} size={32} />
@@ -326,7 +472,6 @@ export default function Funcionarios() {
         </button>
       </div>
 
-      {/* Barra de Pesquisa */}
       <div className="mb-6">
         <div className="relative">
           <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" size={20} />
@@ -336,12 +481,10 @@ export default function Funcionarios() {
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
             className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2"
-            style={{ focusRingColor: "#174E9A" }}
           />
         </div>
       </div>
 
-      {/* Tabela */}
       <div className="bg-white rounded-lg shadow-md border border-gray-200 overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full">
@@ -375,15 +518,27 @@ export default function Funcionarios() {
                 filteredFuncionarios.map((func) => (
                   <tr key={func.id} className="hover:bg-gray-50">
                     <td className="px-6 py-4 whitespace-nowrap">
-                      <div className="h-10 w-10 rounded-full bg-gray-200 flex items-center justify-center text-gray-600 font-semibold overflow-hidden">
+                      <div className="h-10 w-10 rounded-full flex items-center justify-center overflow-hidden" 
+                           style={{ 
+                             backgroundColor: func.image ? 'transparent' : '#e5e7eb',
+                             border: func.image ? '2px solid #d1d5db' : 'none'
+                           }}>
                         {func.image ? (
                           <img 
-                            src={`data:image/jpeg;base64,${func.image}`} 
+                            src={getImageSrc(func.image)} 
                             alt={func.name}
                             className="h-full w-full object-cover"
+                            onError={(e) => {
+                              console.error("❌ Erro ao carregar imagem do usuário ID:", func.id);
+                              console.log("   Tamanho da string base64:", func.image?.length);
+                              e.target.onerror = null; // Previne loop infinito
+                              e.target.src = 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40"><text x="20" y="20" text-anchor="middle" fill="gray" font-size="24">👤</text></svg>';
+                            }}
                           />
                         ) : (
-                          <Users size={20} />
+                          <div className="text-gray-600">
+                            <Users size={20} />
+                          </div>
                         )}
                       </div>
                     </td>
@@ -428,7 +583,6 @@ export default function Funcionarios() {
         </div>
       </div>
 
-      {/* Modal */}
       {showModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-lg w-full max-w-2xl max-h-[90vh] overflow-y-auto">
@@ -441,8 +595,7 @@ export default function Funcionarios() {
               </button>
             </div>
 
-            <form onSubmit={handleSubmit} className="p-6 space-y-4">
-              {/* Nome */}
+            <div className="p-6 space-y-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
                   Nome Completo *
@@ -459,7 +612,6 @@ export default function Funcionarios() {
                 {errors.name && <p className="text-red-500 text-sm mt-1">{errors.name}</p>}
               </div>
 
-              {/* Matrícula */}
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
                   Matrícula *
@@ -476,7 +628,6 @@ export default function Funcionarios() {
                 {errors.registration && <p className="text-red-500 text-sm mt-1">{errors.registration}</p>}
               </div>
 
-              {/* Senha */}
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
                   Senha {!isEditing && "*"}
@@ -502,7 +653,6 @@ export default function Funcionarios() {
                 {errors.password && <p className="text-red-500 text-sm mt-1">{errors.password}</p>}
               </div>
 
-              {/* Departamentos */}
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
                   Departamentos
@@ -526,7 +676,6 @@ export default function Funcionarios() {
                 </div>
               </div>
 
-              {/* Horários */}
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
                   Horários de Acesso
@@ -550,19 +699,40 @@ export default function Funcionarios() {
                 </div>
               </div>
 
-              {/* Imagem */}
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
                   Foto
                 </label>
                 
                 {formData.image && (
-                  <div className="mb-3 flex justify-center">
-                    <img 
-                      src={`data:image/jpeg;base64,${formData.image}`}
-                      alt="Preview"
-                      className="h-32 w-32 object-cover rounded-lg border-2 border-gray-300"
-                    />
+                  <div className="mb-3">
+                    <div className="flex justify-center mb-2">
+                      <div className="relative">
+                        <img 
+                          src={getImageSrc(formData.image)}
+                          alt="Preview"
+                          className="h-32 w-32 object-cover rounded-lg border-2 border-gray-300"
+                          onError={(e) => {
+                            console.error("❌ Erro ao carregar preview da imagem");
+                            console.log("   Base64 length:", formData.image?.length);
+                            console.log("   Base64 starts with:", formData.image?.substring(0, 50));
+                            e.target.onerror = null;
+                            e.target.src = 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128"><text x="64" y="64" text-anchor="middle" fill="red" font-size="16">Erro</text></svg>';
+                          }}
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setFormData(prev => ({ ...prev, image: null }))}
+                          className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full p-1 hover:bg-red-600"
+                          title="Remover imagem"
+                        >
+                          <X size={16} />
+                        </button>
+                      </div>
+                    </div>
+                    <div className="text-xs text-gray-500 text-center">
+                      Tamanho: {Math.round((formData.image?.length || 0) * 0.75 / 1024)} KB
+                    </div>
                   </div>
                 )}
 
@@ -598,7 +768,6 @@ export default function Funcionarios() {
                 )}
               </div>
 
-              {/* Botões */}
               <div className="flex gap-3 pt-4">
                 <button
                   type="button"
@@ -608,14 +777,15 @@ export default function Funcionarios() {
                   Cancelar
                 </button>
                 <button
-                  type="submit"
+                  type="button"
+                  onClick={handleSubmit}
                   className="flex-1 px-4 py-2 text-white rounded-lg hover:opacity-90 transition"
                   style={{ backgroundColor: "#174E9A" }}
                 >
                   {isEditing ? "Atualizar" : "Criar"}
                 </button>
               </div>
-            </form>
+            </div>
           </div>
         </div>
       )}
