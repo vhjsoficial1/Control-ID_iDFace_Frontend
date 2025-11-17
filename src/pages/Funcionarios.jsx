@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { Users, Plus, Search, Edit2, Trash2, Camera, Upload, X, Eye, EyeOff, RefreshCw, AlertCircle, CheckCircle } from "lucide-react";
 
 const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:8000/api/v1';
@@ -44,12 +44,39 @@ export default function Funcionarios() {
 
   const [errors, setErrors] = useState({});
 
-  useEffect(() => {
-    loadData();
-    syncFromDevice();
+  const loadData = useCallback(async () => {
+    setLoading(true);
+    try {
+      const [usersRes, deptRes, horariosRes] = await Promise.all([
+        fetch(`${API_URL}/users/`),
+        fetch(`${API_URL}/access-rules/groups/`),
+        fetch(`${API_URL}/time-zones/`)
+      ]);
+
+      const usersData = await usersRes.json();
+      const deptData = await deptRes.json();
+      const horariosData = await horariosRes.json();
+
+      console.log("📊 Dados carregados:");
+      console.log("- Usuários:", usersData.users?.length || 0);
+      console.log("- Departamentos:", deptData?.length || 0);
+      console.log("- Horários:", horariosData?.length || 0);
+      
+      const usersWithImage = usersData.users?.filter(u => u.image) || [];
+      console.log("- Usuários com imagem:", usersWithImage.length);
+
+      setFuncionarios(usersData.users || []);
+      setDepartamentos(deptData || []);
+      setHorarios(horariosData || []);
+    } catch (error) {
+      console.error("❌ Erro ao carregar dados:", error);
+      alert("Erro ao carregar dados. Verifique a conexão com o servidor.");
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
-  const syncFromDevice = async () => {
+  const syncFromDevice = useCallback(async () => {
     try {
       console.log("🔄 Sincronizando usuários do leitor para o banco local...");
       
@@ -90,39 +117,12 @@ export default function Funcionarios() {
       console.error("❌ Erro ao sincronizar do leitor:", error);
       setInitialSyncComplete(true);
     }
-  };
+  }, [loadData]);
 
-  const loadData = async () => {
-    setLoading(true);
-    try {
-      const [usersRes, deptRes, horariosRes] = await Promise.all([
-        fetch(`${API_URL}/users/`),
-        fetch(`${API_URL}/access-rules/groups/`),
-        fetch(`${API_URL}/time-zones/`)
-      ]);
-
-      const usersData = await usersRes.json();
-      const deptData = await deptRes.json();
-      const horariosData = await horariosRes.json();
-
-      console.log("📊 Dados carregados:");
-      console.log("- Usuários:", usersData.users?.length || 0);
-      console.log("- Departamentos:", deptData?.length || 0);
-      console.log("- Horários:", horariosData?.length || 0);
-      
-      const usersWithImage = usersData.users?.filter(u => u.image) || [];
-      console.log("- Usuários com imagem:", usersWithImage.length);
-
-      setFuncionarios(usersData.users || []);
-      setDepartamentos(deptData || []);
-      setHorarios(horariosData || []);
-    } catch (error) {
-      console.error("❌ Erro ao carregar dados:", error);
-      alert("Erro ao carregar dados. Verifique a conexão com o servidor.");
-    } finally {
-      setLoading(false);
-    }
-  };
+  useEffect(() => {
+    loadData();
+    syncFromDevice();
+  }, [loadData, syncFromDevice]);
 
   const filteredFuncionarios = funcionarios.filter(func => 
     func.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -514,36 +514,7 @@ export default function Funcionarios() {
     }));
   };
 
-  const manualSync = async (userId) => {
-    if (!window.confirm("Deseja forçar a sincronização deste funcionário com o leitor facial?")) {
-      return;
-    }
 
-    try {
-      const response = await fetch(`${API_URL}/users/${userId}/sync-to-idface`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          syncImage: true,
-          syncCards: true,
-          syncAccessRules: true
-        })
-      });
-
-      if (!response.ok) {
-        throw new Error("Erro ao sincronizar");
-      }
-
-      const result = await response.json();
-      console.log("Resultado da sincronização:", result);
-      
-      alert("✅ Sincronização concluída com sucesso!");
-      loadData();
-    } catch (error) {
-      console.error("Erro ao sincronizar:", error);
-      alert("Erro ao sincronizar funcionário");
-    }
-  };
 
   const viewDetails = async (funcionario) => {
     try {
