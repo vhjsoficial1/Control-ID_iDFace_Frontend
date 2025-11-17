@@ -231,12 +231,12 @@ export default function Funcionarios() {
     setSyncStatus({ type: 'info', message: 'Salvando funcionário...' });
 
     try {
-      // 1️⃣ Criar/Atualizar usuário básico
+      // 1️⃣ Criar/Atualizar usuário básico (COM imagem já incluída)
       const payload = {
         name: formData.name.trim(),
         registration: formData.registration.trim(),
         password: formData.password || undefined,
-        image: formData.image || undefined
+        image: formData.image || undefined  // Incluir imagem no payload inicial
       };
 
       let response;
@@ -247,6 +247,7 @@ export default function Funcionarios() {
           body: JSON.stringify(payload)
         });
       } else {
+        // Criar novo usuário COM imagem
         response = await fetch(`${API_URL}/users/`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -263,21 +264,9 @@ export default function Funcionarios() {
       console.log("✅ Usuário salvo:", savedUser);
       const userId = savedUser.id;
 
-      // 2️⃣ Atualizar imagem se necessário
-      if (formData.image && formData.image !== savedUser.image) {
-        setSyncStatus({ type: 'info', message: 'Salvando imagem...' });
-        const imgRes = await fetch(`${API_URL}/users/${userId}/image`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ image: formData.image })
-        });
-
-        if (!imgRes.ok) {
-          console.error("❌ Falha ao salvar imagem");
-        }
-      }
-
-      // 3️⃣ Gerenciar departamentos (grupos)
+      // 2️⃣ Gerenciar departamentos (grupos)
+      setSyncStatus({ type: 'info', message: 'Configurando departamentos...' });
+      
       if (isEditing) {
         // Buscar vínculos atuais
         const currentUserDetail = await fetch(`${API_URL}/users/${userId}`);
@@ -323,7 +312,7 @@ export default function Funcionarios() {
         }
       }
 
-      // 4️⃣ Gerenciar horários (time zones)
+      // 3️⃣ Gerenciar horários (time zones)
       setSyncStatus({ type: 'info', message: 'Configurando horários de acesso...' });
       
       if (isEditing) {
@@ -381,34 +370,11 @@ export default function Funcionarios() {
         }
       }
 
-      // 5️⃣ Sincronizar com o leitor iDFace
-      setSyncStatus({ type: 'info', message: 'Sincronizando com o leitor facial...' });
-      
-      const syncRes = await fetch(`${API_URL}/users/${userId}/sync-to-idface`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          syncImage: true,
-          syncCards: true,
-          syncAccessRules: true
-        })
+      // 4️⃣ Aguardar a sincronização completa (o backend já faz isso automaticamente)
+      setSyncStatus({ 
+        type: 'success', 
+        message: 'Funcionário sincronizado com sucesso!' 
       });
-
-      if (syncRes.ok) {
-        const syncResult = await syncRes.json();
-        console.log("✅ Resultado da sincronização:", syncResult);
-        setSyncStatus({ 
-          type: 'success', 
-          message: 'Funcionário sincronizado com sucesso!' 
-        });
-      } else {
-        const err = await syncRes.json();
-        console.error("❌ Erro na sincronização:", err);
-        setSyncStatus({ 
-          type: 'warning', 
-          message: 'Funcionário salvo, mas houve erro na sincronização com o leitor.' 
-        });
-      }
 
       // Aguardar um pouco para mostrar o status
       await new Promise(resolve => setTimeout(resolve, 1500));
