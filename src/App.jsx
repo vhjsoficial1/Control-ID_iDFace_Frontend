@@ -16,17 +16,17 @@ export default function App() {
   const [currentPage, setCurrentPage] = useState("dashboard");
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
-  const handleAbrirPorta = async () => {
+const handleAbrirPorta = async () => {
     try {
-      const result = await controlIdService.openDoor();
+      const result = await controlIdService.openSecBox();
       if (result.success) {
-        alert("✅ Porta aberta com sucesso!");
+        alert(`✅ ${result.message}\n\nAção: ${result.action}\nExecutado em: ${new Date(result.executedAt).toLocaleString('pt-BR')}`);
       } else {
-        alert("❌ Erro ao abrir porta");
+        alert(`❌ Erro ao abrir porta\n\n${result.message || 'Erro desconhecido'}`);
       }
     } catch (error) {
-      alert("❌ Erro ao comunicar com o dispositivo");
-      console.error(error);
+      console.error("Erro ao abrir porta:", error);
+      alert("❌ Erro ao comunicar com o dispositivo\n\nVerifique se o servidor está rodando e se o leitor facial está acessível.");
     }
   };
 

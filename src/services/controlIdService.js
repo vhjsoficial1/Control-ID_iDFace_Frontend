@@ -89,6 +89,13 @@ export const controlIdService = {
     return response.data;
   },
 
+  openSecBox: async (secboxId = 65793, reason = 3, timeout = 3) => {
+    const response = await api.post(
+      `/system/actions/open-secbox?secbox_id=${secboxId}&reason=${reason}&timeout=${timeout}`
+    );
+    return response.data;
+  },
+
   getSystemInfo: async () => {
     const response = await api.get('/system/info');
     return response.data;
