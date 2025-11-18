@@ -220,51 +220,102 @@ export default function Horarios() {
       }));
 
       const payload = {
-        name: formData.name.trim(),
-        timeSpans: timeSpansForBackend
+        name: formData.name.trim()
       };
 
       let response;
-      if (isEditing) {
-        response = await fetch(`${API_URL}/time-zones/${formData.id}`, {
+      console.log("🔍 isEditing:", isEditing);
+      console.log("🔍 formData.id:", formData.id);
+      
+      if (isEditing && formData.id) {
+        // 1️⃣ Atualizar apenas o nome via PATCH
+        const patchUrl = `${API_URL}/time-zones/${formData.id}`;
+        console.log("🔧 PATCH URL:", patchUrl);
+        console.log("🔧 Payload:", payload);
+        
+        response = await fetch(patchUrl, {
           method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ name: payload.name })
-        });
-
-        if (!response.ok) {
-          throw new Error("Erro ao atualizar horário");
-        }
-
-        // Deletar time spans antigos
-        const currentHorario = horarios.find(h => h.id === formData.id);
-        if (currentHorario?.timeSpans) {
-          for (const span of currentHorario.timeSpans) {
-            await fetch(`${API_URL}/time-zones/spans/${span.id}`, {
-              method: "DELETE"
-            });
-          }
-        }
-
-        // Criar novos time spans
-        for (const span of timeSpansForBackend) {
-          await fetch(`${API_URL}/time-zones/${formData.id}/spans`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(span)
-          });
-        }
-      } else {
-        response = await fetch(`${API_URL}/time-zones/`, {
-          method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(payload)
         });
 
         if (!response.ok) {
           const errorData = await response.json();
+          console.error("❌ Erro da API:", errorData);
+          throw new Error(errorData.detail || "Erro ao atualizar horário");
+        }
+
+        console.log("✅ Nome do horário atualizado com sucesso");
+
+        // 2️⃣ Buscar dados ATUALIZADOS do backend para ver quais timeSpans existem
+        setSaveStatus({ type: 'info', message: 'Atualizando períodos...' });
+        const getResponse = await fetch(`${API_URL}/time-zones/${formData.id}`);
+        if (getResponse.ok) {
+          const currentHorario = await getResponse.json();
+          console.log("📝 TimeZone atual do backend:", currentHorario);
+          
+          // Deletar TODOS os timeSpans atuais
+          if (currentHorario?.timeSpans && currentHorario.timeSpans.length > 0) {
+            for (const span of currentHorario.timeSpans) {
+              try {
+                const deleteRes = await fetch(`${API_URL}/time-zones/spans/${span.id}`, {
+                  method: "DELETE"
+                });
+                if (deleteRes.ok) {
+                  console.log(`✅ TimeSpan ${span.id} deletado`);
+                }
+              } catch (err) {
+                console.error(`❌ Erro ao deletar timeSpan ${span.id}:`, err);
+              }
+            }
+          }
+        }
+
+        // 3️⃣ Criar novos timeSpans
+        for (const span of timeSpansForBackend) {
+          try {
+            const spanRes = await fetch(`${API_URL}/time-zones/${formData.id}/spans`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(span)
+            });
+            
+            if (!spanRes.ok) {
+              const error = await spanRes.json();
+              console.error("❌ Erro ao criar timeSpan:", error);
+              throw new Error("Erro ao criar timeSpan");
+            }
+            const createdSpan = await spanRes.json();
+            console.log(`✅ TimeSpan criado:`, createdSpan);
+          } catch (err) {
+            console.error(`❌ Erro ao criar timeSpan:`, err);
+            throw err;
+          }
+        }
+
+        // ⚠️ NOTA: sync-to-idface está criando duplicata no backend
+        // Remover esta chamada até que o backend seja corrigido
+        console.log("✅ Horário atualizado com sucesso (sincronização do backend pendente)");
+      } else {
+        // Criar novo horário com timeSpans
+        console.log("📝 Criando novo horário...");
+        const createPayload = {
+          name: payload.name,
+          timeSpans: timeSpansForBackend
+        };
+
+        response = await fetch(`${API_URL}/time-zones/`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(createPayload)
+        });
+
+        if (!response.ok) {
+          const errorData = await response.json();
           throw new Error(errorData.detail || "Erro ao criar horário");
         }
+
+        console.log("✅ Horário criado com sucesso");
       }
 
       setSaveStatus({
