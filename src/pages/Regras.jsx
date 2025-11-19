@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from "react";
-import { Users, Plus, Search, Edit2, Trash2, X, RefreshCw, AlertCircle, CheckCircle, Building2, Eye } from "lucide-react";
+import { Plus, Search, Edit2, Trash2, X, RefreshCw, AlertCircle, CheckCircle, Building2 } from "lucide-react";
 
 const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:8000/api/v1';
 
@@ -13,8 +13,6 @@ export default function Departamentos() {
   const [isEditing, setIsEditing] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [syncStatus, setSyncStatus] = useState(null);
-  const [showDetailsModal, setShowDetailsModal] = useState(false);
-  const [selectedDepartamento, setSelectedDepartamento] = useState(null);
   
   const [formData, setFormData] = useState({
     id: null,
@@ -37,11 +35,6 @@ export default function Departamentos() {
       const deptData = await deptRes.json();
       const usersData = await usersRes.json();
       const horariosData = await horariosRes.json();
-
-      console.log("📊 Dados carregados:");
-      console.log("- Departamentos:", deptData?.length || 0);
-      console.log("- Funcionários:", usersData.users?.length || 0);
-      console.log("- Horários:", horariosData?.length || 0);
 
       setDepartamentos(deptData || []);
       setFuncionarios(usersData.users || []);
@@ -71,37 +64,76 @@ export default function Departamentos() {
       let vinculatedHorarios = [];
       
       try {
-        // Buscar usuários do departamento
+        // 1️⃣ Buscar usuários do departamento
         const usersResponse = await fetch(`${API_URL}/access-rules/groups/${departamento.id}/users`);
         if (usersResponse.ok) {
           const usersData = await usersResponse.json();
           vinculatedUsers = usersData.users?.map(u => u.id) || [];
         }
 
-        // Para buscar horários, precisamos buscar as regras de acesso do grupo
-        const rulesResponse = await fetch(`${API_URL}/access-rules/?include_details=true`);
-        if (rulesResponse.ok) {
-          const rulesData = await rulesResponse.json();
+        // 2️⃣ Buscar os horários vinculados a este grupo
+        // A relação é: Group -> GroupAccessRule -> AccessRule -> AccessRuleTimeZone -> TimeZone
+        try {
+          let timeZoneIds = new Set();
+          let foundEndpoint = false;
           
-          // Encontrar regras vinculadas a este grupo
-          const groupRules = rulesData.filter(rule => 
-            rule.groupAccessRules?.some(gar => gar.groupId === departamento.id)
-          );
+          try {
+            const groupRulesResponse = await fetch(`${API_URL}/access-rules/groups/${departamento.id}/access-rules`);
+            
+            if (groupRulesResponse.ok) {
+              const groupRules = await groupRulesResponse.json();
+              foundEndpoint = true;
+              
+              // Extrair timeZones de cada regra
+              groupRules.forEach(rule => {
+                if (rule.timeZones && Array.isArray(rule.timeZones)) {
+                  rule.timeZones.forEach(tz => {
+                    if (tz.id) {
+                      timeZoneIds.add(tz.id);
+                    }
+                  });
+                }
+              });
+            }
+          } catch (err) {
+            // Silenciosamente falha e tenta fallback
+          }
           
-          // Extrair time zones dessas regras
-          const timeZoneIds = new Set();
-          groupRules.forEach(rule => {
-            rule.timeZones?.forEach(tz => {
-              if (tz.timeZone) {
-                timeZoneIds.add(tz.timeZone.id);
-              }
-            });
-          });
+          // Fallback: se não encontrou regras via endpoint específico, usar heurística
+          if (!foundEndpoint || timeZoneIds.size === 0) {
+            const rulesResponse = await fetch(`${API_URL}/access-rules/`);
+            if (rulesResponse.ok) {
+              const rulesData = await rulesResponse.json();
+              
+              // Heurística: procurar por regras que contenham o nome do grupo
+              const deptName = departamento.name.toLowerCase();
+              
+              rulesData.forEach(rule => {
+                // Verificar se o nome da regra contém o nome do departamento
+                const ruleNameLower = rule.name.toLowerCase();
+                const isRelatedByName = ruleNameLower.includes(deptName) || 
+                                       ruleNameLower.includes(`group: ${deptName}`) ||
+                                       ruleNameLower.includes(`grupo: ${deptName}`);
+                
+                if (isRelatedByName) {
+                  if (rule.timeZones && Array.isArray(rule.timeZones)) {
+                    rule.timeZones.forEach(tz => {
+                      if (tz.id) {
+                        timeZoneIds.add(tz.id);
+                      }
+                    });
+                  }
+                }
+              });
+            }
+          }
           
           vinculatedHorarios = Array.from(timeZoneIds);
+        } catch (err) {
+          console.error("❌ Erro ao buscar horários:", err);
         }
       } catch (err) {
-        console.error("Erro ao carregar vínculos:", err);
+        console.error("❌ Erro ao carregar vínculos:", err);
       }
       
       setFormData({
@@ -342,15 +374,6 @@ export default function Departamentos() {
         ? prev.horarios.filter(id => id !== horarioId)
         : [...prev.horarios, horarioId]
     }));
-  };
-
-  const getDepartmentStats = (deptId) => {
-    // Contar funcionários e horários vinculados
-    // Esta é uma implementação simplificada - idealmente viria da API
-    return {
-      funcionarios: 0,
-      horarios: 0
-    };
   };
 
   if (loading) {
