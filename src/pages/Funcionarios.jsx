@@ -5,15 +5,50 @@ const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:8000/api/v1';
 
 // Helper para garantir que a imagem base64 tenha o prefixo correto
 const getImageSrc = (base64String) => {
-  if (!base64String) return null;
+  if (!base64String) {
+    console.log("⚠️ Base64 string vazia");
+    return null;
+  }
+
+  console.log("🖼️ Processando imagem base64, primeiros 50 caracteres:", base64String.substring(0, 50));
   
   // Se já tem o prefixo data:image, retorna como está
   if (base64String.startsWith('data:image')) {
+    console.log("✅ Imagem já tem prefixo data:image");
     return base64String;
   }
   
-  // Caso contrário, adiciona o prefixo (assume JPEG por padrão)
-  return `data:image/jpeg;base64,${base64String}`;
+  // Detectar o tipo de imagem baseado nos primeiros bytes (magic numbers)
+  let mimeType = 'image/jpeg'; // padrão
+  
+  try {
+    // Verificar magic numbers (primeiros bytes)
+    if (base64String.startsWith('/9j/')) {
+      mimeType = 'image/jpeg';
+      console.log("🖼️ Detectado: JPEG");
+    } else if (base64String.startsWith('iVBORw0KGgo')) {
+      mimeType = 'image/png';
+      console.log("🖼️ Detectado: PNG");
+    } else if (base64String.startsWith('R0lGOD')) {
+      mimeType = 'image/gif';
+      console.log("🖼️ Detectado: GIF");
+    } else if (base64String.startsWith('Qk0')) {
+      mimeType = 'image/bmp';
+      console.log("🖼️ Detectado: BMP");
+    } else if (base64String.startsWith('AAAA')) {
+      mimeType = 'image/webp';
+      console.log("🖼️ Detectado: WebP");
+    } else {
+      console.log("⚠️ Tipo de imagem não detectado, usando JPEG como padrão");
+    }
+  } catch (e) {
+    console.warn('❌ Erro ao detectar tipo de imagem:', e);
+  }
+  
+  // Adiciona o prefixo com o tipo detectado
+  const result = `data:${mimeType};base64,${base64String}`;
+  console.log("✅ Imagem processada, comprimento total:", result.length);
+  return result;
 };
 
 export default function Funcionarios() {
@@ -62,10 +97,27 @@ export default function Funcionarios() {
       console.log("- Departamentos:", deptData?.length || 0);
       console.log("- Horários:", horariosData?.length || 0);
       
-      const usersWithImage = usersData.users?.filter(u => u.image) || [];
+      // Buscar imagens para cada usuário
+      const usersWithImages = await Promise.all(
+        (usersData.users || []).map(async (user) => {
+          try {
+            const imageRes = await fetch(`${API_URL}/users/${user.id}/image`);
+            if (imageRes.ok) {
+              const imageData = await imageRes.json();
+              console.log(`📸 Imagem carregada para ${user.name}:`, imageData.image?.substring(0, 30) + "...");
+              return { ...user, image: imageData.image };
+            }
+          } catch (err) {
+            console.warn(`⚠️ Erro ao buscar imagem para usuário ${user.id}:`, err);
+          }
+          return user;
+        })
+      );
+
+      const usersWithImage = usersWithImages.filter(u => u.image) || [];
       console.log("- Usuários com imagem:", usersWithImage.length);
 
-      setFuncionarios(usersData.users || []);
+      setFuncionarios(usersWithImages);
       setDepartamentos(deptData || []);
       setHorarios(horariosData || []);
     } catch (error) {
@@ -525,6 +577,22 @@ export default function Funcionarios() {
       }
       
       const detailedFunc = await response.json();
+      console.log("📋 Detalhes do funcionário carregados:", detailedFunc);
+      console.log("   - userGroups:", detailedFunc.userGroups);
+      console.log("   - userAccessRules:", detailedFunc.userAccessRules);
+      
+      // Buscar imagem também
+      try {
+        const imageRes = await fetch(`${API_URL}/users/${funcionario.id}/image`);
+        if (imageRes.ok) {
+          const imageData = await imageRes.json();
+          console.log("📸 Imagem carregada no modal de detalhes");
+          detailedFunc.image = imageData.image;
+        }
+      } catch (err) {
+        console.warn("⚠️ Erro ao buscar imagem no modal:", err);
+      }
+      
       setSelectedFuncionario(detailedFunc);
       setShowDetailsModal(true);
     } catch (error) {
@@ -650,10 +718,17 @@ export default function Funcionarios() {
                             src={getImageSrc(func.image)} 
                             alt={func.name}
                             className="h-full w-full object-cover"
+                            loading="lazy"
                             onError={(e) => {
-                              console.error("❌ Erro ao carregar imagem do usuário ID:", func.id);
+                              console.error("❌ Erro ao carregar imagem base64 do usuário ID:", func.id);
+                              console.error("   Src da imagem:", e.target.src.substring(0, 100));
+                              console.error("   Erro:", e);
                               e.target.onerror = null;
-                              e.target.src = 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" width="48" height="48"><rect width="48" height="48" fill="%23f3f4f6"/><text x="24" y="28" text-anchor="middle" fill="%239ca3af" font-size="20">👤</text></svg>';
+                              e.target.style.display = 'none';
+                              e.target.parentElement.innerHTML = '<div class="text-gray-400 text-2xl" style="width: 100%; height: 100%; display: flex; align-items: center; justify-content: center;">👤</div>';
+                            }}
+                            onLoad={() => {
+                              console.log("✅ Imagem carregada com sucesso para usuário:", func.id);
                             }}
                           />
                         ) : (
@@ -937,7 +1012,20 @@ export default function Funcionarios() {
                 <div className="md:col-span-1 flex flex-col items-center">
                   <div className="w-48 h-48 rounded-lg border-2 border-gray-200 flex items-center justify-center overflow-hidden mb-4">
                     {selectedFuncionario.image ? (
-                      <img src={getImageSrc(selectedFuncionario.image)} alt={selectedFuncionario.name} className="h-full w-full object-cover" />
+                      <img 
+                        src={getImageSrc(selectedFuncionario.image)} 
+                        alt={selectedFuncionario.name} 
+                        className="h-full w-full object-cover"
+                        loading="lazy"
+                        onError={(e) => {
+                          console.error("❌ Erro ao carregar imagem do funcionário:", selectedFuncionario.id);
+                          e.target.onerror = null;
+                          e.target.parentElement.innerHTML = '<div class="text-center text-gray-400"><div style="font-size: 60px">👤</div><p>Sem imagem</p></div>';
+                        }}
+                        onLoad={() => {
+                          console.log("✅ Imagem de detalhes carregada com sucesso:", selectedFuncionario.id);
+                        }}
+                      />
                     ) : (
                       <div className="text-center text-gray-400">
                         <Users size={60} />
