@@ -280,7 +280,11 @@ export default function Dashboard() {
   const formatTimestamp = (timestamp) => {
     if (!timestamp) return '-';
     const date = new Date(timestamp);
-    return date.toLocaleTimeString('pt-BR', { 
+
+    // Corrigir UTC -> UTC-3
+    const corrected = new Date(date.getTime() + 3 * 60 * 60 * 1000);
+
+    return corrected.toLocaleTimeString('pt-BR', { 
       hour: '2-digit', 
       minute: '2-digit', 
       second: '2-digit' 
