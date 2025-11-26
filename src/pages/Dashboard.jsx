@@ -110,124 +110,106 @@ export default function Dashboard() {
   // Buscar novos logs em tempo real (polling)
   const fetchNewLogs = useCallback(async () => {
     try {
-      console.log('📡 Fetching realtime monitor data...');
+      console.log('📡 [Polling] Ciclo de sincronização iniciado...');
+      
+      // Passo 1: Buscar novos eventos via real-time
+      console.log('1️⃣ Buscando novos eventos em tempo real...');
       const data = await dashboardService.monitorFullStatus(lastLogId);
-
-      console.log('📊 Monitor response:', data);
 
       if (data.success) {
         // Atualizar status do dispositivo
         const deviceOnline = data.deviceStatus === 'online';
         setDeviceStatus(deviceOnline ? 'online' : 'offline');
-        console.log(`🔌 Device status: ${deviceOnline ? '🟢 online' : '🔴 offline'}`);
 
-        // Se houver novos logs
+        // Passo 2: Se houver novos logs, inserir no topo
         if (data.logs?.newCount > 0 && data.logs?.newlyFound?.length > 0) {
           console.log(`🔔 ${data.logs.newCount} novo(s) log(s) detectado(s)!`);
           
-          // Formatar e adicionar novos logs ao início da lista
           const formattedNewLogs = dashboardService.processLogsResponse({
             success: true,
             newLogs: data.logs.newlyFound
           });
 
           setRecentLogs(prev => {
-            console.log('📝 Novos logs formatados:', formattedNewLogs);
             const combined = [...formattedNewLogs, ...prev];
-            // Manter apenas os 100 logs mais recentes na memória
-            return combined.slice(0, 100);
+            return combined.slice(0, 10);
           });
 
-          // Atualizar lastLogId
           if (data.logs.lastId) {
-            console.log(`✅ Atualizado lastLogId para: ${data.logs.lastId}`);
             setLastLogId(data.logs.lastId);
           }
 
-          // Atualizar estatísticas quando houver novos logs
+          // Atualizar estatísticas
           fetchStats();
-        } else {
-          console.log('⏳ Nenhum novo log');
         }
 
         setError(null);
       } else {
         console.error('❌ Response success é false:', data);
-        setError('Erro ao conectar com o dispositivo');
         setDeviceStatus('offline');
       }
+
+      // Passo 3: Validar com banco - buscar os 10 mais recentes (garantia de consistência)
+      console.log('2️⃣ Validando com banco (garantia de consistência)...');
+      try {
+        const bankLogs = await getRecentAccessLogs(0, 10);
+        
+        if (bankLogs.logs && bankLogs.logs.length > 0) {
+          const bankFormatted = bankLogs.logs.map(log => dashboardService.formatLog(log));
+          
+          // Passo 4: Comparar e ajustar se houver diferença
+          setRecentLogs(prev => {
+            const localIds = new Set(prev.map(l => l.id));
+            const bankIds = new Set(bankFormatted.map(l => l.id));
+            
+            // Verificar se há diferenças
+            const hasDifference = 
+              localIds.size !== bankIds.size || 
+              [...localIds].some(id => !bankIds.has(id));
+            
+            if (hasDifference) {
+              console.log(`⚠️ Diferença detectada! Local: ${localIds.size}, Banco: ${bankIds.size}`);
+              console.log(`✅ Sincronizando com banco (${bankFormatted.length} registros)`);
+              return bankFormatted;
+            }
+            
+            return prev;
+          });
+        }
+      } catch (bankErr) {
+        console.warn('⚠️ Erro ao validar com banco (continuando):', bankErr.message);
+      }
+
     } catch (err) {
-      console.error('❌ Erro ao buscar novos logs:', err);
-      setError('Erro ao conectar com o dispositivo');
+      console.error('❌ Erro no ciclo de polling:', err);
       setDeviceStatus('offline');
     }
   }, [lastLogId, fetchStats]);
 
   // Carrega dados históricos (logs anteriores não em tempo real)
-  const loadHistoricalData = useCallback(async () => {
+  // Carrega 10 logs iniciais do banco
+  const loadInitialLogs = useCallback(async () => {
     try {
-      console.log('📖 Carregando dados históricos do AccessLog...');
+      console.log('📖 Carregando 10 logs iniciais do banco...');
+      const logsData = await getRecentAccessLogs(0, 10);
       
-      // Buscar logs históricos em quantidade maior
-      const historicalData = await dashboardService.getHistoricalLogs(0, 500, {});
-      
-      console.log('✅ Histórico carregado:', {
-        total: historicalData.total,
-        logs: historicalData.logs?.length,
-        firstLog: historicalData.logs?.[0],
-        lastLog: historicalData.logs?.[historicalData.logs.length - 1]
+      console.log('✅ Logs iniciais carregados:', {
+        total: logsData.total,
+        count: logsData.logs?.length
       });
       
-      // Se houver logs históricos, adicionar à lista
-      if (historicalData.logs && historicalData.logs.length > 0) {
-        console.log(`📋 ${historicalData.logs.length} log(s) bruto(s) recebido(s)`);
+      if (logsData.logs && logsData.logs.length > 0) {
+        const formatted = logsData.logs.map(log => dashboardService.formatLog(log));
+        console.log(`📊 ${formatted.length} log(s) pronto(s)`);
         
-        const formattedHistorical = historicalData.logs.map(log => {
-          const formatted = dashboardService.formatLog(log);
-          return formatted;
-        });
-        
-        console.log(`✅ ${formattedHistorical.length} log(s) histórico(s) formatado(s)`);
-        console.log('📝 Primeiros logs formatados:', formattedHistorical.slice(0, 2));
-        
-        // Definir logs históricos (substituir completamente com dados do AccessLog)
-        setRecentLogs(prev => {
-          console.log(`🔍 Estado anterior: ${prev.length} log(s)`);
-          
-          // Se houver logs em tempo real, manter no topo
-          const existingIds = new Set(prev.map(l => l.id));
-          const realtimeLogs = prev.filter(log => log.id);
-          
-          // Adicionar logs históricos evitando duplicatas
-          const toAdd = formattedHistorical.filter(log => !existingIds.has(log.id));
-          
-          console.log(`📊 Logs em tempo real: ${realtimeLogs.length}, novos históricos: ${toAdd.length}`);
-          
-          if (toAdd.length > 0) {
-            console.log(`✅ Adicionados ${toAdd.length} log(s) histórico(s) do AccessLog`);
-            const combined = [...realtimeLogs, ...toAdd].slice(0, 500);
-            console.log(`📈 Total após merge: ${combined.length} log(s)`);
-            return combined;
-          }
-          
-          // Se não há realtime logs, usar apenas históricos
-          if (realtimeLogs.length === 0) {
-            console.log(`✅ Preenchido com ${formattedHistorical.length} log(s) histórico(s)`);
-            const result = formattedHistorical.slice(0, 500);
-            console.log(`📈 Total históricos definido: ${result.length} log(s)`);
-            return result;
-          }
-          
-          console.log('⏳ Nenhuma mudança necessária');
-          return prev;
-        });
+        setRecentLogs(formatted);
       } else {
-        console.warn('⚠️  Nenhum log histórico encontrado no AccessLog');
-        console.warn('Response completo:', historicalData);
+        console.warn('⚠️ Nenhum log encontrado');
+        setRecentLogs([]);
       }
     } catch (err) {
-      console.error('❌ Erro ao carregar histórico:', err);
-      console.error('Stack:', err.stack);
+      console.error('❌ Erro ao carregar logs iniciais:', err);
+      setRecentLogs([]);
     }
   }, []);
 
@@ -237,31 +219,13 @@ export default function Dashboard() {
       setLoading(true);
       
       try {
-        // Buscar logs iniciais usando o novo serviço
         console.log('🚀 Inicializando Dashboard...');
-        const logsData = await dashboardService.getNewLogs();
         
-        console.log('📋 Initial logs response:', logsData);
+        // Carregar 10 logs do banco
+        await loadInitialLogs();
         
-        if (logsData.success) {
-          const formattedLogs = dashboardService.processLogsResponse(logsData);
-          console.log(`📊 ${formattedLogs.length} log(s) inicial(ns) carregado(s)`);
-          setRecentLogs(formattedLogs);
-          
-          if (logsData.lastId) {
-            console.log(`✅ lastLogId inicializado para: ${logsData.lastId}`);
-            setLastLogId(logsData.lastId);
-          }
-        } else {
-          console.warn('⚠️  Response não contém success=true');
-        }
-
-        // Buscar estatísticas e dados históricos em paralelo
-        console.log('📊 Carregando estatísticas e histórico...');
-        await Promise.all([
-          fetchStats(),
-          loadHistoricalData()
-        ]);
+        // Carregar estatísticas
+        await fetchStats();
         
         setError(null);
       } catch (err) {
@@ -273,17 +237,22 @@ export default function Dashboard() {
     };
 
     initializeDashboard();
-  }, [fetchStats, loadHistoricalData]);
+  }, [loadInitialLogs, fetchStats]);
 
-  // Polling em tempo real (a cada 3 segundos)
+  // Polling em tempo real (a cada 2 segundos)
   useEffect(() => {
     if (!isPolling) return;
 
+    console.log('⏱️ Iniciando polling a cada 2 segundos...');
+    
     const interval = setInterval(() => {
       fetchNewLogs();
-    }, 3000);
+    }, 2000);
 
-    return () => clearInterval(interval);
+    return () => {
+      clearInterval(interval);
+      console.log('⏹️ Polling parado');
+    };
   }, [isPolling, fetchNewLogs]);
 
   // Funções auxiliares
