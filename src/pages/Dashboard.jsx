@@ -28,7 +28,8 @@ export default function Dashboard() {
 
   // ==================== FUNÇÕES DE FORMATAÇÃO ====================
   
-  const getImageSrc = (base64String) => {
+  // Mover funções de formatação para useCallback para evitar warnings
+  const getImageSrc = useCallback((base64String) => {
     if (!base64String) return null;
     if (base64String.startsWith('data:image')) return base64String;
 
@@ -48,16 +49,15 @@ export default function Dashboard() {
     } catch (e) {}
 
     return `data:${mimeType};base64,${base64String}`;
-  };
+  }, []);
 
-  const formatLog = (log) => {
+  const formatLog = useCallback((log) => {
     const user = log.user || {};
-    const portal = log.portal || {};
     
     let eventDisplay = log.event;
     if (log.event === 'access_granted' || log.event === 'Acesso Concedido') {
       eventDisplay = 'Acesso Concedido';
-    } else if (log.event === 'access_denied' || log.event === 'Acesso Negado') {
+    } else if (log.event === 'access_denied' || log.event === 'Acesso Negado' || log.event === 'unknown' || log.event === 'Desconhecido') {
       eventDisplay = 'Acesso Negado';
     }
     
@@ -72,18 +72,21 @@ export default function Dashboard() {
       userName: log.userName || user.name || 'Desconhecido',
       userId: log.userId,
       userImage: userImage,
-      portalName: log.portalName || portal.name || 'Entrada',
-      portalId: log.portalId,
       event: eventDisplay,
       timestamp: log.timestamp,
       reason: log.reason,
       cardValue: log.cardValue
     };
-  };
+  }, [getImageSrc]);
 
   const formatTimestamp = (timestamp) => {
     if (!timestamp) return '-';
+
     const date = new Date(timestamp);
+
+    // Ajuste de fuso: UTC-3
+    date.setHours(date.getHours() + 3);
+
     return date.toLocaleString('pt-BR', {
       day: '2-digit',
       month: '2-digit',
@@ -94,6 +97,7 @@ export default function Dashboard() {
     });
   };
 
+
   const getStatusBadge = (event) => {
     if (event === 'Acesso Concedido' || event === 'access_granted') {
       return (
@@ -101,7 +105,7 @@ export default function Dashboard() {
           <CheckCircle size={16} /> Concedido
         </span>
       );
-    } else if (event === 'Acesso Negado' || event === 'access_denied') {
+    } else if (event === 'Acesso Negado' || event === 'access_denied' || event === 'unknown' || event === 'Desconhecido') {
       return (
         <span className="px-3 py-1 rounded-full text-sm font-semibold bg-red-100 text-red-800 flex items-center gap-1">
           <XCircle size={16} /> Negado
@@ -154,7 +158,7 @@ export default function Dashboard() {
       setError('Erro ao carregar logs de acesso');
       setAllLogs([]);
     }
-  }, []);
+  }, [formatLog]);
 
   // ==================== BUSCAR ESTATÍSTICAS ====================
   
@@ -183,7 +187,7 @@ export default function Dashboard() {
           const count = eventGroup.count || 0;
           if (eventGroup.event === 'Acesso Concedido' || eventGroup.event === 'access_granted') {
             grantedLast7Days += count;
-          } else if (eventGroup.event === 'Acesso Negado' || eventGroup.event === 'access_denied') {
+          } else if (eventGroup.event === 'Acesso Negado' || eventGroup.event === 'access_denied' || eventGroup.event === 'unknown' || eventGroup.event === 'Desconhecido') {
             deniedLast7Days += count;
           }
         });
@@ -257,7 +261,7 @@ export default function Dashboard() {
       console.error('❌ Erro no polling:', err);
       setDeviceStatus('offline');
     }
-  }, [lastLogId, fetchStats]);
+  }, [lastLogId, fetchStats, formatLog]);
 
   // ==================== EFFECTS ====================
   
@@ -475,7 +479,6 @@ export default function Dashboard() {
                       </p>
                       <div className="flex items-center gap-4 text-sm text-gray-600 mt-1">
                         <span>🕐 {formatTimestamp(log.timestamp)}</span>
-                        <span>🚪 {log.portalName}</span>
                         {log.reason && (
                           <span className="text-orange-600">⚠️ {log.reason}</span>
                         )}
