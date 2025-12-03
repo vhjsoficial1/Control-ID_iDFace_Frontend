@@ -1,7 +1,9 @@
-import { useState } from "react";
+// src/App.jsx
+import { useState, useEffect } from "react";
 import Sidebar from "./components/Sidebar";
 import Header from "./components/Header";
 import LoginPage from "./components/LoginPage";
+import CadastroAdmin from "./pages/CadastroAdmin";
 import { useAuth } from "./hooks/useAuth";
 import Dashboard from "./pages/Dashboard";
 import Funcionarios from "./pages/Funcionarios";
@@ -15,8 +17,22 @@ export default function App() {
   const { user } = useAuth();
   const [currentPage, setCurrentPage] = useState("dashboard");
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [currentRoute, setCurrentRoute] = useState(window.location.pathname);
 
-const handleAbrirPorta = async () => {
+  // Monitorar mudanças de rota
+  useEffect(() => {
+    const handleLocationChange = () => {
+      setCurrentRoute(window.location.pathname);
+    };
+
+    window.addEventListener('popstate', handleLocationChange);
+    
+    return () => {
+      window.removeEventListener('popstate', handleLocationChange);
+    };
+  }, []);
+
+  const handleAbrirPorta = async () => {
     try {
       const result = await controlIdService.openSecBox();
       if (result.success) {
@@ -30,8 +46,15 @@ const handleAbrirPorta = async () => {
     }
   };
 
+  // Rota de cadastro (pública)
+  if (currentRoute === '/cadastro') {
+    return <CadastroAdmin />;
+  }
+
+  // Se não estiver logado, mostrar login
   if (!user) return <LoginPage />;
 
+  // Dashboard principal (usuário logado)
   return (
     <div className="flex h-screen bg-white">
       <Sidebar
