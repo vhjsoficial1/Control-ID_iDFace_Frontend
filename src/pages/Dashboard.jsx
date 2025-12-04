@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { Users, CheckCircle, XCircle, Clock, RefreshCw, AlertCircle, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Users, CheckCircle, XCircle, Clock, RefreshCw, AlertCircle, ChevronLeft, ChevronRight, Cpu } from 'lucide-react';
 import api from '../services/api';
 
 export default function Dashboard() {
@@ -21,6 +21,7 @@ export default function Dashboard() {
   // Estados de tempo real
   const [lastLogId, setLastLogId] = useState(null);
   const [deviceStatus, setDeviceStatus] = useState('offline');
+  const [deviceInfo, setDeviceInfo] = useState(null);
   const [isPolling, setIsPolling] = useState(true);
   const [newLogsCount, setNewLogsCount] = useState(0);
 
@@ -28,7 +29,6 @@ export default function Dashboard() {
 
   // ==================== FUNÇÕES DE FORMATAÇÃO ====================
   
-  // Mover funções de formatação para useCallback para evitar warnings
   const getImageSrc = useCallback((base64String) => {
     if (!base64String) return null;
     if (base64String.startsWith('data:image')) return base64String;
@@ -83,8 +83,6 @@ export default function Dashboard() {
     if (!timestamp) return '-';
 
     const date = new Date(timestamp);
-
-    // Ajuste de fuso: UTC-3
     date.setHours(date.getHours() + 3);
 
     return date.toLocaleString('pt-BR', {
@@ -96,7 +94,6 @@ export default function Dashboard() {
       second: '2-digit'
     });
   };
-
 
   const getStatusBadge = (event) => {
     if (event === 'Acesso Concedido' || event === 'access_granted') {
@@ -119,17 +116,40 @@ export default function Dashboard() {
     );
   };
 
+  // ==================== BUSCAR INFO DO DISPOSITIVO ====================
+  
+  const fetchDeviceInfo = useCallback(async () => {
+    try {
+      console.log('🔌 Buscando informações do dispositivo...');
+      
+      const response = await api.get('/realtime/device-info');
+      
+      if (response.data.success && response.data.device) {
+        console.log('✅ Dispositivo conectado:', response.data.device);
+        setDeviceInfo(response.data.device);
+        setDeviceStatus('online');
+      } else {
+        console.warn('⚠️ Dispositivo não disponível');
+        setDeviceInfo(null);
+        setDeviceStatus('offline');
+      }
+    } catch (err) {
+      console.error('❌ Erro ao buscar info do dispositivo:', err);
+      setDeviceInfo(null);
+      setDeviceStatus('offline');
+    }
+  }, []);
+
   // ==================== BUSCAR LOGS HISTÓRICOS ====================
   
   const fetchAllLogs = useCallback(async () => {
     try {
       console.log('📖 Carregando todos os logs do banco...');
       
-      // Buscar TODOS os logs (sem paginação no backend, fazemos aqui)
       const response = await api.get('/audit/', {
         params: {
           skip: 0,
-          limit: 1000 // Buscar bastante para ter histórico
+          limit: 1000
         }
       });
 
@@ -143,7 +163,6 @@ export default function Dashboard() {
         setAllLogs(formatted);
         setTotalLogs(response.data.total);
         
-        // Atualizar lastLogId com o mais recente
         if (formatted.length > 0) {
           setLastLogId(formatted[0].id);
         }
@@ -166,11 +185,9 @@ export default function Dashboard() {
     try {
       console.log('📊 Buscando estatísticas...');
       
-      // 1. Total de usuários
       const usersResponse = await api.get('/users/');
       const totalUsers = usersResponse.data?.users?.length || 0;
 
-      // 2. Estatísticas de acesso dos últimos 7 dias
       const statsResponse = await api.get('/audit/stats/summary', {
         params: {
           groupByDate: true
@@ -181,7 +198,6 @@ export default function Dashboard() {
       let grantedLast7Days = 0;
       let deniedLast7Days = 0;
 
-      // Processar estatísticas por evento
       if (statsResponse.data.byEvent) {
         statsResponse.data.byEvent.forEach(eventGroup => {
           const count = eventGroup.count || 0;
@@ -217,7 +233,7 @@ export default function Dashboard() {
   // ==================== POLLING TEMPO REAL ====================
   
   const fetchNewLogs = useCallback(async () => {
-    if (!lastLogId) return; // Precisa ter carregado os logs históricos primeiro
+    if (!lastLogId) return;
 
     try {
       console.log('📡 Polling: verificando novos logs...');
@@ -227,30 +243,31 @@ export default function Dashboard() {
       });
 
       if (response.data.success) {
-        setDeviceStatus(response.data.deviceStatus || 'offline');
+        const status = response.data.deviceStatus || 'offline';
+        setDeviceStatus(status);
 
-        // Se houver novos logs
+        // Atualizar info do dispositivo se estava offline
+        if (status === 'online' && !deviceInfo) {
+          fetchDeviceInfo();
+        }
+
         if (response.data.logs?.newCount > 0 && response.data.logs?.newlyFound?.length > 0) {
           console.log(`🔔 ${response.data.logs.newCount} novo(s) log(s)!`);
           
           const newLogs = response.data.logs.newlyFound.map(formatLog);
           
           setAllLogs(prev => {
-            // Adicionar novos logs no início
             const updated = [...newLogs, ...prev];
             return updated;
           });
 
-          // Atualizar lastLogId
           if (response.data.logs.lastId) {
             setLastLogId(response.data.logs.lastId);
           }
 
-          // Mostrar notificação visual
           setNewLogsCount(prev => prev + newLogs.length);
           setTimeout(() => setNewLogsCount(0), 3000);
 
-          // Atualizar estatísticas
           fetchStats();
         }
       } else {
@@ -261,7 +278,7 @@ export default function Dashboard() {
       console.error('❌ Erro no polling:', err);
       setDeviceStatus('offline');
     }
-  }, [lastLogId, fetchStats, formatLog]);
+  }, [lastLogId, fetchStats, formatLog, deviceInfo, fetchDeviceInfo]);
 
   // ==================== EFFECTS ====================
   
@@ -272,6 +289,7 @@ export default function Dashboard() {
       
       try {
         await Promise.all([
+          fetchDeviceInfo(),
           fetchAllLogs(),
           fetchStats()
         ]);
@@ -283,7 +301,7 @@ export default function Dashboard() {
     };
 
     initializeDashboard();
-  }, [fetchAllLogs, fetchStats]);
+  }, [fetchDeviceInfo, fetchAllLogs, fetchStats]);
 
   // Polling em tempo real
   useEffect(() => {
@@ -291,7 +309,7 @@ export default function Dashboard() {
 
     const interval = setInterval(() => {
       fetchNewLogs();
-    }, 2000); // A cada 2 segundos
+    }, 2000);
 
     return () => clearInterval(interval);
   }, [isPolling, loading, fetchNewLogs]);
@@ -339,6 +357,19 @@ export default function Dashboard() {
       <div className="flex justify-between items-center mb-6">
         <h1 className="text-3xl font-bold text-gray-800">Dashboard de Acessos</h1>
         <div className="flex items-center gap-4">
+          {/* Info do Dispositivo */}
+          {deviceInfo && (
+            <div className="flex items-center gap-2 px-4 py-2 bg-white rounded-lg shadow-sm border">
+              <Cpu className="text-blue-600" size={20} />
+              <div className="text-left">
+                <div className="text-xs text-gray-500">Dispositivo</div>
+                <div className="text-sm font-semibold text-gray-800">
+                  ID: {deviceInfo.id} - {deviceInfo.name}
+                </div>
+              </div>
+            </div>
+          )}
+          
           {/* Status do dispositivo */}
           <div className="flex items-center gap-2 px-4 py-2 bg-white rounded-lg shadow-sm border">
             <div className={`w-3 h-3 rounded-full ${deviceStatus === 'online' ? 'bg-green-500 animate-pulse' : 'bg-red-500'}`} />
@@ -370,6 +401,7 @@ export default function Dashboard() {
           {/* Botão de atualizar */}
           <button
             onClick={() => {
+              fetchDeviceInfo();
               fetchAllLogs();
               fetchStats();
             }}
