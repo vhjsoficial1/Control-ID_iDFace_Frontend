@@ -1,6 +1,177 @@
 import { useState, useEffect, useCallback } from 'react';
-import { Users, CheckCircle, XCircle, Clock, RefreshCw, AlertCircle, ChevronLeft, ChevronRight } from 'lucide-react';
-import api from '../services/api';
+import { Users, CheckCircle, XCircle, Clock, RefreshCw, AlertCircle, ChevronLeft, ChevronRight, Cpu } from 'lucide-react';
+
+// ==================== CONFIGURAÇÃO DA API (EMBUTIDA) ====================
+// Integrada diretamente para evitar erros de importação no ambiente de build
+const API_BASE_URL = 'http://localhost:8000/api/v1';
+
+/**
+ * Cliente HTTP leve que simula a interface do Axios usando Fetch API.
+ */
+const api = {
+  get: async (endpoint, config = {}) => {
+    try {
+      const url = new URL(`${API_BASE_URL}${endpoint}`);
+      
+      if (config.params) {
+        Object.keys(config.params).forEach(key => 
+          url.searchParams.append(key, config.params[key])
+        );
+      }
+
+      const response = await fetch(url.toString(), {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+          ...config.headers
+        }
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        const errorMessage = data.detail || data.message || `Erro ${response.status}: ${response.statusText}`;
+        const error = new Error(errorMessage);
+        error.response = { data, status: response.status };
+        throw error;
+      }
+
+      return { 
+        data, 
+        status: response.status,
+        success: response.ok
+      };
+    } catch (error) {
+      // Ignora erros de polling para não poluir o console
+      if (!endpoint.includes('/monitor')) {
+        console.error(`Erro na requisição GET ${endpoint}:`, error);
+      }
+      throw error;
+    }
+  }
+};
+
+// ==================== SERVIÇO DE DASHBOARD (EMBUTIDO) ====================
+
+const dashboardService = {
+  /**
+   * Monitora status completo do sistema
+   */
+  async monitorFullStatus(sinceId = null) {
+    try {
+      const params = sinceId ? { since_id: sinceId } : {};
+      const response = await api.get('/realtime/monitor', { params });
+      return response.data;
+    } catch (error) {
+      throw error;
+    }
+  },
+
+  /**
+   * Busca informações do dispositivo
+   */
+  async getDeviceInfo() {
+    try {
+      const response = await api.get('/realtime/device-info');
+      return response.data;
+    } catch (error) {
+      console.error('❌ Erro ao buscar info do dispositivo:', error);
+      throw error;
+    }
+  },
+
+  /**
+   * Busca contagem total de usuários
+   */
+  async getTotalUsers() {
+    try {
+      const response = await api.get('/users/');
+      return response.data?.users?.length || 0;
+    } catch (error) {
+      return 0;
+    }
+  },
+
+  /**
+   * Busca logs históricos de auditoria
+   */
+  async getHistoricalLogs(skip = 0, limit = 50) {
+    try {
+      const response = await api.get('/audit/', { 
+        params: { skip, limit } 
+      });
+      return response.data;
+    } catch (error) {
+      console.error('❌ Erro ao buscar logs históricos:', error);
+      throw error;
+    }
+  },
+
+  /**
+   * Busca estatísticas de acesso
+   */
+  async getAccessStatistics(options = {}) {
+    try {
+      const response = await api.get('/audit/stats/summary', { params: options });
+      return response.data;
+    } catch (error) {
+      console.error('❌ Erro ao buscar estatísticas:', error);
+      throw error;
+    }
+  },
+
+  /**
+   * Formata um log para exibição
+   */
+  formatLog(log) {
+    const user = log.user || {};
+    const portal = log.portal || {};
+    
+    let eventDisplay = log.event;
+    if (log.event === 'access_granted' || log.event === 'Acesso Concedido' || log.event === 7) {
+      eventDisplay = 'Acesso Concedido';
+    } else if (log.event === 'access_denied' || log.event === 'Acesso Negado' || log.event === 0 || log.event === 'Desconhecido' ) {
+      eventDisplay = 'Acesso Negado';
+    }
+    
+    let userImage = null;
+    if (user.image) {
+      userImage = this.getImageSrc(user.image);
+    }
+    
+    return {
+      id: log.id || log.idFaceLogId,
+      idFaceLogId: log.idFaceLogId,
+      userName: log.userName || user.name || 'Desconhecido',
+      userId: log.userId,
+      userImage: userImage,
+      portalName: log.portalName || portal.name || 'Entrada',
+      portalId: log.portalId,
+      event: eventDisplay,
+      timestamp: log.timestamp,
+      reason: log.reason,
+      cardValue: log.cardValue
+    };
+  },
+
+  getImageSrc(base64String) {
+    if (!base64String) return null;
+    if (base64String.startsWith('data:image')) return base64String;
+
+    let mimeType = 'image/jpeg';
+    try {
+      const binaryString = atob(base64String.substring(0, 20));
+      const bytes = new Uint8Array(binaryString.length);
+      
+      if (bytes[0] === 0xFF && bytes[1] === 0xD8 && bytes[2] === 0xFF) mimeType = 'image/jpeg';
+      else if (bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4E) mimeType = 'image/png';
+    } catch (e) {}
+
+    return `data:${mimeType};base64,${base64String}`;
+  }
+};
+
+// ==================== COMPONENTE PRINCIPAL ====================
 
 export default function Dashboard() {
   // Estados principais
@@ -21,82 +192,27 @@ export default function Dashboard() {
   // Estados de tempo real
   const [lastLogId, setLastLogId] = useState(null);
   const [deviceStatus, setDeviceStatus] = useState('offline');
+  const [deviceInfo, setDeviceInfo] = useState(null);
   const [isPolling, setIsPolling] = useState(true);
   const [newLogsCount, setNewLogsCount] = useState(0);
 
   const logsPerPage = 10;
 
-  // ==================== FUNÇÕES DE FORMATAÇÃO ====================
-  
-  // Mover funções de formatação para useCallback para evitar warnings
-  const getImageSrc = useCallback((base64String) => {
-    if (!base64String) return null;
-    if (base64String.startsWith('data:image')) return base64String;
-
-    let mimeType = 'image/jpeg';
-    try {
-      const binaryString = atob(base64String.substring(0, 20));
-      const bytes = new Uint8Array(binaryString.length);
-      for (let i = 0; i < binaryString.length; i++) {
-        bytes[i] = binaryString.charCodeAt(i);
-      }
-
-      if (bytes[0] === 0xFF && bytes[1] === 0xD8 && bytes[2] === 0xFF) {
-        mimeType = 'image/jpeg';
-      } else if (bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4E) {
-        mimeType = 'image/png';
-      }
-    } catch (e) {}
-
-    return `data:${mimeType};base64,${base64String}`;
-  }, []);
-
-  const formatLog = useCallback((log) => {
-    const user = log.user || {};
-    
-    let eventDisplay = log.event;
-    if (log.event === 'access_granted' || log.event === 'Acesso Concedido') {
-      eventDisplay = 'Acesso Concedido';
-    } else if (log.event === 'access_denied' || log.event === 'Acesso Negado' || log.event === 'unknown' || log.event === 'Desconhecido') {
-      eventDisplay = 'Acesso Negado';
-    }
-    
-    let userImage = null;
-    if (user.image) {
-      userImage = getImageSrc(user.image);
-    }
-    
-    return {
-      id: log.id,
-      idFaceLogId: log.idFaceLogId,
-      userName: log.userName || user.name || 'Desconhecido',
-      userId: log.userId,
-      userImage: userImage,
-      event: eventDisplay,
-      timestamp: log.timestamp,
-      reason: log.reason,
-      cardValue: log.cardValue
-    };
-  }, [getImageSrc]);
+  // ==================== FUNÇÕES AUXILIARES ====================
 
   const formatTimestamp = (timestamp) => {
     if (!timestamp) return '-';
-
+    
     const date = new Date(timestamp);
-
-    // Ajuste de fuso: UTC-3
+    
+    // Adiciona 3 horas à data criada
     date.setHours(date.getHours() + 3);
 
     return date.toLocaleString('pt-BR', {
-      day: '2-digit',
-      month: '2-digit',
-      year: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit',
-      second: '2-digit'
+      day: '2-digit', month: '2-digit', year: 'numeric',
+      hour: '2-digit', minute: '2-digit', second: '2-digit'
     });
   };
-
 
   const getStatusBadge = (event) => {
     if (event === 'Acesso Concedido' || event === 'access_granted') {
@@ -105,7 +221,7 @@ export default function Dashboard() {
           <CheckCircle size={16} /> Concedido
         </span>
       );
-    } else if (event === 'Acesso Negado' || event === 'access_denied' || event === 'unknown' || event === 'Desconhecido') {
+    } else if (event === 'Acesso Negado' || event === 'access_denied' || event === 'Desconhecido') {
       return (
         <span className="px-3 py-1 rounded-full text-sm font-semibold bg-red-100 text-red-800 flex items-center gap-1">
           <XCircle size={16} /> Negado
@@ -114,36 +230,39 @@ export default function Dashboard() {
     }
     return (
       <span className="px-3 py-1 rounded-full text-sm font-semibold bg-gray-100 text-gray-800">
-        Desconhecido
+        {event || 'Desconhecido'}
       </span>
     );
   };
 
-  // ==================== BUSCAR LOGS HISTÓRICOS ====================
+  // ==================== CARGA DE DADOS ====================
   
+  const fetchDeviceInfo = useCallback(async () => {
+    try {
+      const response = await dashboardService.getDeviceInfo();
+      
+      if (response.success && response.device) {
+        setDeviceInfo(response.device);
+        setDeviceStatus('online');
+      } else {
+        setDeviceInfo(null);
+        setDeviceStatus('offline');
+      }
+    } catch (err) {
+      setDeviceInfo(null);
+      setDeviceStatus('offline');
+    }
+  }, []);
+
   const fetchAllLogs = useCallback(async () => {
     try {
-      console.log('📖 Carregando todos os logs do banco...');
-      
-      // Buscar TODOS os logs (sem paginação no backend, fazemos aqui)
-      const response = await api.get('/audit/', {
-        params: {
-          skip: 0,
-          limit: 1000 // Buscar bastante para ter histórico
-        }
-      });
+      const data = await dashboardService.getHistoricalLogs(0, 1000);
 
-      console.log('✅ Logs carregados:', {
-        total: response.data.total,
-        count: response.data.logs?.length
-      });
-
-      if (response.data.logs && response.data.logs.length > 0) {
-        const formatted = response.data.logs.map(formatLog);
+      if (data.logs && data.logs.length > 0) {
+        const formatted = data.logs.map(log => dashboardService.formatLog(log));
         setAllLogs(formatted);
-        setTotalLogs(response.data.total);
+        setTotalLogs(data.total);
         
-        // Atualizar lastLogId com o mais recente
         if (formatted.length > 0) {
           setLastLogId(formatted[0].id);
         }
@@ -151,183 +270,132 @@ export default function Dashboard() {
         setAllLogs([]);
         setTotalLogs(0);
       }
-
       setError(null);
     } catch (err) {
-      console.error('❌ Erro ao carregar logs:', err);
-      setError('Erro ao carregar logs de acesso');
+      console.error(err);
+      setError('Erro ao conectar com o servidor. Verifique se o main.py está rodando.');
       setAllLogs([]);
     }
-  }, [formatLog]);
+  }, []);
 
-  // ==================== BUSCAR ESTATÍSTICAS ====================
-  
   const fetchStats = useCallback(async () => {
     try {
-      console.log('📊 Buscando estatísticas...');
-      
-      // 1. Total de usuários
-      const usersResponse = await api.get('/users/');
-      const totalUsers = usersResponse.data?.users?.length || 0;
+      const [totalUsers, statsData] = await Promise.all([
+        dashboardService.getTotalUsers(),
+        dashboardService.getAccessStatistics({ groupByDate: true })
+      ]);
 
-      // 2. Estatísticas de acesso dos últimos 7 dias
-      const statsResponse = await api.get('/audit/stats/summary', {
-        params: {
-          groupByDate: true
-        }
-      });
-
-      let totalAccessesLast7Days = 0;
       let grantedLast7Days = 0;
       let deniedLast7Days = 0;
 
-      // Processar estatísticas por evento
-      if (statsResponse.data.byEvent) {
-        statsResponse.data.byEvent.forEach(eventGroup => {
-          const count = eventGroup.count || 0;
-          if (eventGroup.event === 'Acesso Concedido' || eventGroup.event === 'access_granted') {
+      if (statsData.byEvent) {
+        const events = Array.isArray(statsData.byEvent) 
+          ? statsData.byEvent 
+          : Object.entries(statsData.byEvent).map(([k, v]) => ({ event: k, ...v }));
+
+        events.forEach(group => {
+          const count = group.count || 0;
+          if (group.event === 'access_granted' || group.event === 'Acesso Concedido') {
             grantedLast7Days += count;
-          } else if (eventGroup.event === 'Acesso Negado' || eventGroup.event === 'access_denied' || eventGroup.event === 'unknown' || eventGroup.event === 'Desconhecido') {
+          } else if (group.event === 'access_denied' || group.event === 'Acesso Negado' || group.event === 'Desconhecido') {
             deniedLast7Days += count;
           }
         });
       }
 
-      totalAccessesLast7Days = grantedLast7Days + deniedLast7Days;
-
-      console.log('✅ Estatísticas:', {
-        totalUsers,
-        totalAccessesLast7Days,
-        grantedLast7Days,
-        deniedLast7Days
-      });
-
       setStats({
         totalUsers,
-        totalAccessesLast7Days,
+        totalAccessesLast7Days: grantedLast7Days + deniedLast7Days,
         grantedLast7Days,
         deniedLast7Days
       });
 
     } catch (err) {
-      console.error('❌ Erro ao buscar estatísticas:', err);
+      console.error('Erro ao buscar estatísticas', err);
     }
   }, []);
 
   // ==================== POLLING TEMPO REAL ====================
-  
+
   const fetchNewLogs = useCallback(async () => {
-    if (!lastLogId) return; // Precisa ter carregado os logs históricos primeiro
-
     try {
-      console.log('📡 Polling: verificando novos logs...');
+      const currentLastId = lastLogId || 0;
       
-      const response = await api.get('/realtime/monitor', {
-        params: { since_id: lastLogId }
-      });
+      const data = await dashboardService.monitorFullStatus(currentLastId);
 
-      if (response.data.success) {
-        setDeviceStatus(response.data.deviceStatus || 'offline');
+      if (data.success) {
+        const status = data.deviceStatus || 'offline';
+        setDeviceStatus(status);
 
-        // Se houver novos logs
-        if (response.data.logs?.newCount > 0 && response.data.logs?.newlyFound?.length > 0) {
-          console.log(`🔔 ${response.data.logs.newCount} novo(s) log(s)!`);
-          
-          const newLogs = response.data.logs.newlyFound.map(formatLog);
+        if (status === 'online' && !deviceInfo) {
+          fetchDeviceInfo();
+        }
+
+        const newLogsList = data.logs?.newlyFound || [];
+        const newCount = data.logs?.newCount || 0;
+
+        if (newCount > 0 && newLogsList.length > 0) {
+          const formattedNewLogs = newLogsList.map(log => dashboardService.formatLog(log));
           
           setAllLogs(prev => {
-            // Adicionar novos logs no início
-            const updated = [...newLogs, ...prev];
-            return updated;
+            const existingIds = new Set(prev.map(l => l.id));
+            const unique = formattedNewLogs.filter(l => !existingIds.has(l.id));
+            return [...unique, ...prev];
           });
 
-          // Atualizar lastLogId
-          if (response.data.logs.lastId) {
-            setLastLogId(response.data.logs.lastId);
+          setTotalLogs(prev => prev + formattedNewLogs.length);
+
+          if (data.logs.lastId) {
+            setLastLogId(data.logs.lastId);
           }
 
-          // Mostrar notificação visual
-          setNewLogsCount(prev => prev + newLogs.length);
-          setTimeout(() => setNewLogsCount(0), 3000);
+          setNewLogsCount(prev => prev + formattedNewLogs.length);
+          setTimeout(() => setNewLogsCount(0), 5000);
 
-          // Atualizar estatísticas
           fetchStats();
         }
-      } else {
-        setDeviceStatus('offline');
       }
-
     } catch (err) {
-      console.error('❌ Erro no polling:', err);
       setDeviceStatus('offline');
     }
-  }, [lastLogId, fetchStats, formatLog]);
+  }, [lastLogId, fetchStats, deviceInfo, fetchDeviceInfo]);
 
   // ==================== EFFECTS ====================
-  
-  // Carregar dados iniciais
+
   useEffect(() => {
-    const initializeDashboard = async () => {
-      setLoading(true);
-      
+    const init = async () => {
       try {
-        await Promise.all([
-          fetchAllLogs(),
-          fetchStats()
-        ]);
-      } catch (err) {
-        console.error('❌ Erro na inicialização:', err);
+        await Promise.all([fetchDeviceInfo(), fetchAllLogs(), fetchStats()]);
       } finally {
         setLoading(false);
       }
     };
+    init();
+  }, [fetchDeviceInfo, fetchAllLogs, fetchStats]);
 
-    initializeDashboard();
-  }, [fetchAllLogs, fetchStats]);
-
-  // Polling em tempo real
   useEffect(() => {
     if (!isPolling || loading) return;
-
-    const interval = setInterval(() => {
-      fetchNewLogs();
-    }, 2000); // A cada 2 segundos
-
+    const interval = setInterval(fetchNewLogs, 2000);
     return () => clearInterval(interval);
   }, [isPolling, loading, fetchNewLogs]);
 
-  // ==================== PAGINAÇÃO ====================
+  // ==================== PAGINAÇÃO & RENDER ====================
   
-  const totalPages = Math.ceil(totalLogs / logsPerPage);
+  const totalPages = Math.ceil(totalLogs / logsPerPage) || 1;
   const startIndex = (currentPage - 1) * logsPerPage;
-  const endIndex = startIndex + logsPerPage;
-  const currentLogs = allLogs.slice(startIndex, endIndex);
+  const currentLogs = allLogs.slice(startIndex, startIndex + logsPerPage);
 
   const goToPage = (page) => {
     setCurrentPage(page);
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
-  const goToNextPage = () => {
-    if (currentPage < totalPages) {
-      goToPage(currentPage + 1);
-    }
-  };
-
-  const goToPrevPage = () => {
-    if (currentPage > 1) {
-      goToPage(currentPage - 1);
-    }
-  };
-
-  // ==================== RENDER ====================
-  
   if (loading) {
     return (
       <div className="flex items-center justify-center h-screen">
         <div className="text-center">
           <div className="animate-spin rounded-full h-16 w-16 border-b-2 border-blue-600 mx-auto mb-4"></div>
-          <p className="text-gray-600">Carregando dashboard...</p>
+          <p className="text-gray-600">Carregando painel...</p>
         </div>
       </div>
     );
@@ -339,7 +407,18 @@ export default function Dashboard() {
       <div className="flex justify-between items-center mb-6">
         <h1 className="text-3xl font-bold text-gray-800">Dashboard de Acessos</h1>
         <div className="flex items-center gap-4">
-          {/* Status do dispositivo */}
+          {deviceInfo && (
+            <div className="flex items-center gap-2 px-4 py-2 bg-white rounded-lg shadow-sm border">
+              <Cpu className="text-blue-600" size={20} />
+              <div className="text-left">
+                <div className="text-xs text-gray-500">Dispositivo</div>
+                <div className="text-sm font-semibold text-gray-800">
+                  {deviceInfo.name} ({deviceInfo.ip})
+                </div>
+              </div>
+            </div>
+          )}
+          
           <div className="flex items-center gap-2 px-4 py-2 bg-white rounded-lg shadow-sm border">
             <div className={`w-3 h-3 rounded-full ${deviceStatus === 'online' ? 'bg-green-500 animate-pulse' : 'bg-red-500'}`} />
             <span className="text-sm font-medium text-gray-700">
@@ -347,41 +426,24 @@ export default function Dashboard() {
             </span>
           </div>
           
-          {/* Notificação de novos logs */}
           {newLogsCount > 0 && (
             <div className="px-4 py-2 bg-green-100 text-green-700 rounded-lg font-medium animate-pulse">
-              +{newLogsCount} novo(s) acesso(s)
+              +{newLogsCount} novo(s)
             </div>
           )}
           
-          {/* Toggle de polling */}
           <button
             onClick={() => setIsPolling(!isPolling)}
             className={`px-4 py-2 rounded-lg font-medium transition-colors flex items-center gap-2 ${
-              isPolling 
-                ? 'bg-blue-600 text-white hover:bg-blue-700' 
-                : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+              isPolling ? 'bg-blue-600 text-white hover:bg-blue-700' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
             }`}
           >
             <RefreshCw size={20} className={isPolling ? 'animate-spin' : ''} />
-            {isPolling ? 'Tempo Real ON' : 'Tempo Real OFF'}
-          </button>
-          
-          {/* Botão de atualizar */}
-          <button
-            onClick={() => {
-              fetchAllLogs();
-              fetchStats();
-            }}
-            className="px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors"
-            title="Atualizar dados"
-          >
-            <RefreshCw size={20} />
+            {isPolling ? 'Tempo Real ON' : 'Pausado'}
           </button>
         </div>
       </div>
 
-      {/* Mensagem de erro */}
       {error && (
         <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-lg flex items-center gap-2">
           <AlertCircle className="text-red-600" size={20} />
@@ -389,161 +451,99 @@ export default function Dashboard() {
         </div>
       )}
 
-      {/* Cards de estatísticas */}
+      {/* Cards */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
         <div className="bg-white rounded-lg shadow-md border border-gray-200 p-6 flex justify-between items-center">
           <div>
             <p className="text-gray-600 text-sm">Colaboradores</p>
             <p className="text-3xl font-bold text-blue-600">{stats.totalUsers}</p>
           </div>
-          <div className="p-3 bg-blue-100 rounded-full">
-            <Users className="text-blue-600" size={24} />
-          </div>
+          <div className="p-3 bg-blue-100 rounded-full"><Users className="text-blue-600" size={24} /></div>
         </div>
-
         <div className="bg-white rounded-lg shadow-md border border-gray-200 p-6 flex justify-between items-center">
           <div>
-            <p className="text-gray-600 text-sm">Total de Acessos</p>
+            <p className="text-gray-600 text-sm">Total Acessos</p>
             <p className="text-3xl font-bold text-gray-800">{totalLogs}</p>
           </div>
-          <div className="p-3 bg-gray-100 rounded-full">
-            <Clock className="text-gray-600" size={24} />
-          </div>
+          <div className="p-3 bg-gray-100 rounded-full"><Clock className="text-gray-600" size={24} /></div>
         </div>
-
         <div className="bg-white rounded-lg shadow-md border border-gray-200 p-6 flex justify-between items-center">
           <div>
-            <p className="text-gray-600 text-sm">Concedidos (7 dias)</p>
+            <p className="text-gray-600 text-sm">Concedidos (7d)</p>
             <p className="text-3xl font-bold text-green-600">{stats.grantedLast7Days}</p>
           </div>
-          <div className="p-3 bg-green-100 rounded-full">
-            <CheckCircle className="text-green-600" size={24} />
-          </div>
+          <div className="p-3 bg-green-100 rounded-full"><CheckCircle className="text-green-600" size={24} /></div>
         </div>
-
         <div className="bg-white rounded-lg shadow-md border border-gray-200 p-6 flex justify-between items-center">
           <div>
-            <p className="text-gray-600 text-sm">Negados (7 dias)</p>
+            <p className="text-gray-600 text-sm">Negados (7d)</p>
             <p className="text-3xl font-bold text-red-600">{stats.deniedLast7Days}</p>
           </div>
-          <div className="p-3 bg-red-100 rounded-full">
-            <XCircle className="text-red-600" size={24} />
-          </div>
+          <div className="p-3 bg-red-100 rounded-full"><XCircle className="text-red-600" size={24} /></div>
         </div>
       </div>
 
-      {/* Lista de Acessos */}
+      {/* Tabela */}
       <div className="bg-white rounded-lg shadow-md border border-gray-200 p-6">
         <div className="flex justify-between items-center mb-4">
-          <h2 className="text-xl font-bold text-gray-800">
-            Histórico de Acessos
-          </h2>
-          <span className="text-sm text-gray-500">
-            Total: {totalLogs} registro(s) | Página {currentPage} de {totalPages}
-          </span>
+          <h2 className="text-xl font-bold text-gray-800">Histórico de Acessos</h2>
+          <span className="text-sm text-gray-500">Total: {totalLogs} | Pág {currentPage} de {totalPages}</span>
         </div>
 
-        {currentLogs.length === 0 ? (
-          <div className="text-center py-12 text-gray-500">
-            <Clock size={48} className="mx-auto mb-4 opacity-50" />
-            <p>Nenhum acesso registrado</p>
-          </div>
-        ) : (
-          <>
-            <div className="space-y-3">
-              {currentLogs.map((log) => (
-                <div 
-                  key={log.id} 
-                  className="flex items-center justify-between p-4 bg-gray-50 rounded-lg border hover:bg-gray-100 transition-colors"
-                >
-                  <div className="flex items-center gap-4 flex-1">
-                    <div className="relative">
-                      {log.userImage ? (
-                        <img 
-                          src={log.userImage} 
-                          alt={log.userName}
-                          className="w-12 h-12 rounded-full object-cover border-2 border-gray-300"
-                        />
-                      ) : (
-                        <div className="w-12 h-12 rounded-full bg-gray-300 flex items-center justify-center text-xl">
-                          👤
-                        </div>
-                      )}
-                      <div className="absolute -bottom-1 -right-1">
-                        {log.event === 'Acesso Concedido' ? '✅' : '❌'}
-                      </div>
-                    </div>
-                    <div className="flex-1">
-                      <p className="font-semibold text-gray-800">
-                        {log.userName}
-                      </p>
-                      <div className="flex items-center gap-4 text-sm text-gray-600 mt-1">
-                        <span>🕐 {formatTimestamp(log.timestamp)}</span>
-                        {log.reason && (
-                          <span className="text-orange-600">⚠️ {log.reason}</span>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                  <div>
-                    {getStatusBadge(log.event)}
-                  </div>
+        <div className="space-y-3">
+          {currentLogs.map((log) => (
+            <div key={log.id} className="flex items-center justify-between p-4 bg-gray-50 rounded-lg border hover:bg-gray-100 transition-colors">
+              <div className="flex items-center gap-4 flex-1">
+                <div className="relative">
+                  {log.userImage ? (
+                    <img src={log.userImage} alt={log.userName} className="w-12 h-12 rounded-full object-cover border-2 border-gray-300" />
+                  ) : (
+                    <div className="w-12 h-12 rounded-full bg-gray-300 flex items-center justify-center text-xl">👤</div>
+                  )}
+                  <div className="absolute -bottom-1 -right-1">{log.event === 'Acesso Concedido' ? '✅' : '❌'}</div>
                 </div>
-              ))}
-            </div>
-
-            {/* Paginação */}
-            {totalPages > 1 && (
-              <div className="flex justify-between items-center mt-6 pt-4 border-t">
-                <button
-                  onClick={goToPrevPage}
-                  disabled={currentPage === 1}
-                  className="flex items-center gap-2 px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                >
-                  <ChevronLeft size={20} />
-                  Anterior
-                </button>
-                
-                <div className="flex items-center gap-2">
-                  {[...Array(Math.min(5, totalPages))].map((_, i) => {
-                    let pageNum;
-                    if (totalPages <= 5) {
-                      pageNum = i + 1;
-                    } else if (currentPage <= 3) {
-                      pageNum = i + 1;
-                    } else if (currentPage >= totalPages - 2) {
-                      pageNum = totalPages - 4 + i;
-                    } else {
-                      pageNum = currentPage - 2 + i;
-                    }
+                <div className="flex-1">
+                  <p className="font-semibold text-gray-800">
+                    {log.userName}
+                    {log.userId && <span className="ml-2 text-xs text-gray-500 bg-gray-100 px-2 py-0.5 rounded-full">ID: {log.userId}</span>}
+                  </p>
+                  <div className="flex items-center gap-4 text-sm text-gray-600 mt-1">
+                    <span>🕐 {formatTimestamp(log.timestamp)}</span>
+                    {log.reason && (
+                      <span className={`px-2 py-0.5 rounded text-xs font-medium ${
+                        log.reason.includes('não cadastrado') || log.reason.includes('desconhecida') 
+                          ? 'bg-red-100 text-red-700' 
+                          : 'bg-orange-100 text-orange-700'
+                      }`}>
+                        ⚠️ {log.reason}
+                      </span>
+                    )}
                     
-                    return (
-                      <button
-                        key={pageNum}
-                        onClick={() => goToPage(pageNum)}
-                        className={`px-3 py-1 rounded-lg transition-colors ${
-                          currentPage === pageNum
-                            ? 'bg-blue-600 text-white'
-                            : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                        }`}
-                      >
-                        {pageNum}
-                      </button>
-                    );
-                  })}
+                  </div>
                 </div>
-                
-                <button
-                  onClick={goToNextPage}
-                  disabled={currentPage === totalPages}
-                  className="flex items-center gap-2 px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                >
-                  Próxima
-                  <ChevronRight size={20} />
-                </button>
               </div>
-            )}
-          </>
+              <div>{getStatusBadge(log.event)}</div>
+            </div>
+          ))}
+          {currentLogs.length === 0 && <p className="text-center text-gray-500 py-4">Nenhum registro encontrado.</p>}
+        </div>
+
+        {/* Controles de Paginação */}
+        {totalPages > 1 && (
+          <div className="flex justify-between items-center mt-6 pt-4 border-t">
+            <button onClick={() => setCurrentPage(p => Math.max(1, p - 1))} disabled={currentPage === 1} className="px-4 py-2 bg-gray-200 rounded-lg disabled:opacity-50 flex items-center gap-2"><ChevronLeft size={16}/> Anterior</button>
+            <div className="flex gap-2">
+              {[...Array(Math.min(5, totalPages))].map((_, i) => {
+                 let page = currentPage <= 3 ? i + 1 : currentPage - 2 + i;
+                 if (page > totalPages) page = totalPages - (4 - i);
+                 if (page < 1) page = i + 1;
+                 return (
+                   <button key={page} onClick={() => goToPage(page)} className={`px-3 py-1 rounded ${currentPage === page ? 'bg-blue-600 text-white' : 'bg-gray-100'}`}>{page}</button>
+                 )
+              })}
+            </div>
+            <button onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))} disabled={currentPage === totalPages} className="px-4 py-2 bg-gray-200 rounded-lg disabled:opacity-50 flex items-center gap-2">Próxima <ChevronRight size={16}/></button>
+          </div>
         )}
       </div>
     </div>

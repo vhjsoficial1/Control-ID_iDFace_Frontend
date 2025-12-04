@@ -194,30 +194,17 @@ export default function Funcionarios() {
         const userDetailResponse = await fetch(`${API_URL}/users/${funcionario.id}`);
         if (userDetailResponse.ok) {
           const userDetail = await userDetailResponse.json();
-          console.log("Detalhes do usuário:", userDetail);
+          console.log("📋 Detalhes completos do usuário:", userDetail);
           
-          // Extrair grupos (departamentos) vinculados
-          if (userDetail.userGroups && userDetail.userGroups.length > 0) {
-            vinculatedDepts = userDetail.userGroups.map(ug => ug.groupId);
-          }
+          // Usar as novas funções de extração
+          vinculatedDepts = getDepartamentosFromUser(userDetail);
+          vinculatedHorarios = getHorariosFromUser(userDetail);
           
-          // Extrair horários vinculados através das regras de acesso
-          if (userDetail.userAccessRules && userDetail.userAccessRules.length > 0) {
-            const timeZoneIds = new Set();
-            for (const uar of userDetail.userAccessRules) {
-              if (uar.accessRule && uar.accessRule.timeZones) {
-                uar.accessRule.timeZones.forEach(tz => {
-                  if (tz.timeZone) {
-                    timeZoneIds.add(tz.timeZone.id);
-                  }
-                });
-              }
-            }
-            vinculatedHorarios = Array.from(timeZoneIds);
-          }
+          console.log("📊 Departamentos encontrados:", vinculatedDepts);
+          console.log("⏰ Horários encontrados:", vinculatedHorarios);
         }
       } catch (err) {
-        console.error("Erro ao carregar vínculos:", err);
+        console.error("❌ Erro ao carregar vínculos:", err);
       }
       
       setFormData({
@@ -268,7 +255,13 @@ export default function Funcionarios() {
       newErrors.name = "Nome é obrigatório";
     }
 
-    if (formData.password && formData.password.length < 4) {
+    // Matrícula é obrigatória
+    if (!formData.registration || !formData.registration.trim()) {
+      newErrors.registration = "Matrícula é obrigatória";
+    }
+
+    // Senha opcional - apenas valida o tamanho SE for informada
+    if (formData.password && formData.password.trim() && formData.password.trim().length < 4) {
       newErrors.password = "Senha deve ter no mínimo 4 caracteres";
     }
 
@@ -283,12 +276,15 @@ export default function Funcionarios() {
     setSyncStatus({ type: 'info', message: 'Salvando funcionário...' });
 
     try {
+      // CORREÇÃO: Normalizar registration vazio
+      const normalizedRegistration = formData.registration.trim() || null;
+      
       // 1️⃣ Criar/Atualizar usuário básico (COM imagem já incluída)
       const payload = {
         name: formData.name.trim(),
-        registration: formData.registration.trim(),
+        registration: normalizedRegistration,  // ALTERADO
         password: formData.password || undefined,
-        image: formData.image || undefined  // Incluir imagem no payload inicial
+        image: formData.image || undefined
       };
 
       let response;
@@ -299,7 +295,6 @@ export default function Funcionarios() {
           body: JSON.stringify(payload)
         });
       } else {
-        // Criar novo usuário COM imagem
         response = await fetch(`${API_URL}/users/`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -578,8 +573,6 @@ export default function Funcionarios() {
       
       const detailedFunc = await response.json();
       console.log("📋 Detalhes do funcionário carregados:", detailedFunc);
-      console.log("   - userGroups:", detailedFunc.userGroups);
-      console.log("   - userAccessRules:", detailedFunc.userAccessRules);
       
       // Buscar imagem também
       try {
@@ -593,10 +586,27 @@ export default function Funcionarios() {
         console.warn("⚠️ Erro ao buscar imagem no modal:", err);
       }
       
+      // Extrair departamentos e horários
+      detailedFunc.departamentosIds = getDepartamentosFromUser(detailedFunc);
+      detailedFunc.horariosIds = getHorariosFromUser(detailedFunc);
+      
+      // Mapear nomes dos departamentos
+      detailedFunc.departamentosNomes = detailedFunc.departamentosIds
+        .map(id => departamentos.find(d => d.id === id)?.name)
+        .filter(Boolean);
+      
+      // Mapear nomes dos horários
+      detailedFunc.horariosNomes = detailedFunc.horariosIds
+        .map(id => horarios.find(h => h.id === id)?.name)
+        .filter(Boolean);
+      
+      console.log("📊 Departamentos:", detailedFunc.departamentosNomes);
+      console.log("⏰ Horários:", detailedFunc.horariosNomes);
+      
       setSelectedFuncionario(detailedFunc);
       setShowDetailsModal(true);
     } catch (error) {
-      console.error("Erro ao carregar detalhes:", error);
+      console.error("❌ Erro ao carregar detalhes:", error);
       alert("Erro ao carregar detalhes do funcionário");
     }
   };
@@ -616,6 +626,66 @@ export default function Funcionarios() {
       </div>
     );
   }
+
+  const getDepartamentosFromUser = (user) => {
+    const deptIds = new Set();
+    
+    // Método 1: Via userGroups
+    if (user.userGroups && Array.isArray(user.userGroups)) {
+      user.userGroups.forEach(ug => {
+        if (ug.groupId) deptIds.add(ug.groupId);
+      });
+    }
+    
+    // Método 2: Via groupAccessRules em accessRules
+    if (user.userAccessRules && Array.isArray(user.userAccessRules)) {
+      user.userAccessRules.forEach(uar => {
+        if (uar.accessRule?.groupAccessRules) {
+          uar.accessRule.groupAccessRules.forEach(gar => {
+            if (gar.groupId) deptIds.add(gar.groupId);
+          });
+        }
+      });
+    }
+    
+    return Array.from(deptIds);
+  };
+
+  const getHorariosFromUser = (user) => {
+    const tzIds = new Set();
+    
+    // Via userAccessRules -> accessRule -> timeZones
+    if (user.userAccessRules && Array.isArray(user.userAccessRules)) {
+      user.userAccessRules.forEach(uar => {
+        if (uar.accessRule?.timeZones && Array.isArray(uar.accessRule.timeZones)) {
+          uar.accessRule.timeZones.forEach(art => {
+            if (art.timeZone?.id || art.timeZoneId) {
+              tzIds.add(art.timeZone?.id || art.timeZoneId);
+            }
+          });
+        }
+      });
+    }
+    
+    // Via groupAccessRules (horários do departamento)
+    if (user.userGroups && Array.isArray(user.userGroups)) {
+      user.userGroups.forEach(ug => {
+        if (ug.group?.groupAccessRules) {
+          ug.group.groupAccessRules.forEach(gar => {
+            if (gar.accessRule?.timeZones) {
+              gar.accessRule.timeZones.forEach(art => {
+                if (art.timeZone?.id || art.timeZoneId) {
+                  tzIds.add(art.timeZone?.id || art.timeZoneId);
+                }
+              });
+            }
+          });
+        }
+      });
+    }
+    
+    return Array.from(tzIds);
+  };
 
   return (
     <div className="p-6">
@@ -1053,14 +1123,14 @@ export default function Funcionarios() {
                   <div>
                     <h4 className="font-semibold text-gray-700 mb-2">Departamentos Vinculados</h4>
                     <div className="bg-gray-50 rounded-lg p-4 text-sm border border-gray-200">
-                      {selectedFuncionario.userGroups?.length > 0 ? (
-                        <ul className="list-disc list-inside">
-                          {selectedFuncionario.userGroups.map(ug => (
-                            <li key={ug.groupId}>{ug.group?.name || `ID: ${ug.groupId}`}</li>
+                      {selectedFuncionario.departamentosNomes?.length > 0 ? (
+                        <ul className="list-disc list-inside space-y-1">
+                          {selectedFuncionario.departamentosNomes.map((name, index) => (
+                            <li key={index} className="text-gray-700">{name}</li>
                           ))}
                         </ul>
                       ) : (
-                        <p>Nenhum departamento vinculado.</p>
+                        <p className="text-gray-500 italic">Nenhum departamento vinculado.</p>
                       )}
                     </div>
                   </div>
@@ -1068,22 +1138,20 @@ export default function Funcionarios() {
                   <div>
                     <h4 className="font-semibold text-gray-700 mb-2">Horários de Acesso</h4>
                     <div className="bg-gray-50 rounded-lg p-4 text-sm border border-gray-200">
-                      {selectedFuncionario.userAccessRules?.length > 0 ? (
-                        <ul className="list-disc list-inside">
-                          {/* Extrai e exibe os time zones de todas as regras */}
-                          {Array.from(new Set(selectedFuncionario.userAccessRules.flatMap(uar => 
-                            uar.accessRule?.timeZones?.map(tz => tz.timeZone?.name).filter(Boolean) || []
-                          ))).map(name => <li key={name}>{name}</li>)}
+                      {selectedFuncionario.horariosNomes?.length > 0 ? (
+                        <ul className="list-disc list-inside space-y-1">
+                          {selectedFuncionario.horariosNomes.map((name, index) => (
+                            <li key={index} className="text-gray-700">{name}</li>
+                          ))}
                         </ul>
                       ) : (
-                        <p>Nenhum horário de acesso vinculado.</p>
+                        <p className="text-gray-500 italic">Nenhum horário de acesso vinculado.</p>
                       )}
                     </div>
                   </div>
                 </div>
               </div>
             </div>
-
             <div className="sticky bottom-0 bg-gray-50 border-t border-gray-200 px-6 py-4 flex justify-end gap-3">
               <button
                 onClick={closeDetailsModal}
