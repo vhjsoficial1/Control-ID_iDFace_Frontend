@@ -1,6 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Users, CheckCircle, XCircle, Clock, RefreshCw, AlertCircle, ChevronLeft, ChevronRight, Cpu } from 'lucide-react';
-<<<<<<< HEAD
 
 // ==================== CONFIGURAÇÃO DA API (EMBUTIDA) ====================
 // Integrada diretamente para evitar erros de importação no ambiente de build
@@ -173,9 +172,6 @@ const dashboardService = {
 };
 
 // ==================== COMPONENTE PRINCIPAL ====================
-=======
-import api from '../services/api';
->>>>>>> 3f812ddd05f726429684d8c279e28bac59549ee2
 
 export default function Dashboard() {
   // Estados principais
@@ -202,71 +198,14 @@ export default function Dashboard() {
 
   const logsPerPage = 10;
 
-<<<<<<< HEAD
   // ==================== FUNÇÕES AUXILIARES ====================
-=======
-  // ==================== FUNÇÕES DE FORMATAÇÃO ====================
-  
-  const getImageSrc = useCallback((base64String) => {
-    if (!base64String) return null;
-    if (base64String.startsWith('data:image')) return base64String;
-
-    let mimeType = 'image/jpeg';
-    try {
-      const binaryString = atob(base64String.substring(0, 20));
-      const bytes = new Uint8Array(binaryString.length);
-      for (let i = 0; i < binaryString.length; i++) {
-        bytes[i] = binaryString.charCodeAt(i);
-      }
-
-      if (bytes[0] === 0xFF && bytes[1] === 0xD8 && bytes[2] === 0xFF) {
-        mimeType = 'image/jpeg';
-      } else if (bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4E) {
-        mimeType = 'image/png';
-      }
-    } catch (e) {}
-
-    return `data:${mimeType};base64,${base64String}`;
-  }, []);
-
-  const formatLog = useCallback((log) => {
-    const user = log.user || {};
-    
-    let eventDisplay = log.event;
-    if (log.event === 'access_granted' || log.event === 'Acesso Concedido') {
-      eventDisplay = 'Acesso Concedido';
-    } else if (log.event === 'access_denied' || log.event === 'Acesso Negado' || log.event === 'unknown' || log.event === 'Desconhecido') {
-      eventDisplay = 'Acesso Negado';
-    }
-    
-    let userImage = null;
-    if (user.image) {
-      userImage = getImageSrc(user.image);
-    }
-    
-    return {
-      id: log.id,
-      idFaceLogId: log.idFaceLogId,
-      userName: log.userName || user.name || 'Desconhecido',
-      userId: log.userId,
-      userImage: userImage,
-      event: eventDisplay,
-      timestamp: log.timestamp,
-      reason: log.reason,
-      cardValue: log.cardValue
-    };
-  }, [getImageSrc]);
->>>>>>> 3f812ddd05f726429684d8c279e28bac59549ee2
 
   const formatTimestamp = (timestamp) => {
     if (!timestamp) return '-';
     
     const date = new Date(timestamp);
-<<<<<<< HEAD
     
     // Adiciona 3 horas à data criada
-=======
->>>>>>> 3f812ddd05f726429684d8c279e28bac59549ee2
     date.setHours(date.getHours() + 3);
 
     return date.toLocaleString('pt-BR', {
@@ -296,35 +235,7 @@ export default function Dashboard() {
     );
   };
 
-<<<<<<< HEAD
   // ==================== CARGA DE DADOS ====================
-=======
-  // ==================== BUSCAR INFO DO DISPOSITIVO ====================
-  
-  const fetchDeviceInfo = useCallback(async () => {
-    try {
-      console.log('🔌 Buscando informações do dispositivo...');
-      
-      const response = await api.get('/realtime/device-info');
-      
-      if (response.data.success && response.data.device) {
-        console.log('✅ Dispositivo conectado:', response.data.device);
-        setDeviceInfo(response.data.device);
-        setDeviceStatus('online');
-      } else {
-        console.warn('⚠️ Dispositivo não disponível');
-        setDeviceInfo(null);
-        setDeviceStatus('offline');
-      }
-    } catch (err) {
-      console.error('❌ Erro ao buscar info do dispositivo:', err);
-      setDeviceInfo(null);
-      setDeviceStatus('offline');
-    }
-  }, []);
-
-  // ==================== BUSCAR LOGS HISTÓRICOS ====================
->>>>>>> 3f812ddd05f726429684d8c279e28bac59549ee2
   
   const fetchDeviceInfo = useCallback(async () => {
     try {
@@ -345,18 +256,7 @@ export default function Dashboard() {
 
   const fetchAllLogs = useCallback(async () => {
     try {
-<<<<<<< HEAD
       const data = await dashboardService.getHistoricalLogs(0, 1000);
-=======
-      console.log('📖 Carregando todos os logs do banco...');
-      
-      const response = await api.get('/audit/', {
-        params: {
-          skip: 0,
-          limit: 1000
-        }
-      });
->>>>>>> 3f812ddd05f726429684d8c279e28bac59549ee2
 
       if (data.logs && data.logs.length > 0) {
         const formatted = data.logs.map(log => dashboardService.formatLog(log));
@@ -380,7 +280,6 @@ export default function Dashboard() {
 
   const fetchStats = useCallback(async () => {
     try {
-<<<<<<< HEAD
       const [totalUsers, statsData] = await Promise.all([
         dashboardService.getTotalUsers(),
         dashboardService.getAccessStatistics({ groupByDate: true })
@@ -397,27 +296,6 @@ export default function Dashboard() {
         events.forEach(group => {
           const count = group.count || 0;
           if (group.event === 'access_granted' || group.event === 'Acesso Concedido') {
-=======
-      console.log('📊 Buscando estatísticas...');
-      
-      const usersResponse = await api.get('/users/');
-      const totalUsers = usersResponse.data?.users?.length || 0;
-
-      const statsResponse = await api.get('/audit/stats/summary', {
-        params: {
-          groupByDate: true
-        }
-      });
-
-      let totalAccessesLast7Days = 0;
-      let grantedLast7Days = 0;
-      let deniedLast7Days = 0;
-
-      if (statsResponse.data.byEvent) {
-        statsResponse.data.byEvent.forEach(eventGroup => {
-          const count = eventGroup.count || 0;
-          if (eventGroup.event === 'Acesso Concedido' || eventGroup.event === 'access_granted') {
->>>>>>> 3f812ddd05f726429684d8c279e28bac59549ee2
             grantedLast7Days += count;
           } else if (group.event === 'access_denied' || group.event === 'Acesso Negado' || group.event === 'Desconhecido') {
             deniedLast7Days += count;
@@ -440,17 +318,11 @@ export default function Dashboard() {
   // ==================== POLLING TEMPO REAL ====================
 
   const fetchNewLogs = useCallback(async () => {
-<<<<<<< HEAD
-=======
-    if (!lastLogId) return;
-
->>>>>>> 3f812ddd05f726429684d8c279e28bac59549ee2
     try {
       const currentLastId = lastLogId || 0;
       
       const data = await dashboardService.monitorFullStatus(currentLastId);
 
-<<<<<<< HEAD
       if (data.success) {
         const status = data.deviceStatus || 'offline';
         setDeviceStatus(status);
@@ -479,33 +351,6 @@ export default function Dashboard() {
 
           setNewLogsCount(prev => prev + formattedNewLogs.length);
           setTimeout(() => setNewLogsCount(0), 5000);
-=======
-      if (response.data.success) {
-        const status = response.data.deviceStatus || 'offline';
-        setDeviceStatus(status);
-
-        // Atualizar info do dispositivo se estava offline
-        if (status === 'online' && !deviceInfo) {
-          fetchDeviceInfo();
-        }
-
-        if (response.data.logs?.newCount > 0 && response.data.logs?.newlyFound?.length > 0) {
-          console.log(`🔔 ${response.data.logs.newCount} novo(s) log(s)!`);
-          
-          const newLogs = response.data.logs.newlyFound.map(formatLog);
-          
-          setAllLogs(prev => {
-            const updated = [...newLogs, ...prev];
-            return updated;
-          });
-
-          if (response.data.logs.lastId) {
-            setLastLogId(response.data.logs.lastId);
-          }
-
-          setNewLogsCount(prev => prev + newLogs.length);
-          setTimeout(() => setNewLogsCount(0), 3000);
->>>>>>> 3f812ddd05f726429684d8c279e28bac59549ee2
 
           fetchStats();
         }
@@ -513,28 +358,14 @@ export default function Dashboard() {
     } catch (err) {
       setDeviceStatus('offline');
     }
-<<<<<<< HEAD
   }, [lastLogId, fetchStats, deviceInfo, fetchDeviceInfo]);
-=======
-  }, [lastLogId, fetchStats, formatLog, deviceInfo, fetchDeviceInfo]);
->>>>>>> 3f812ddd05f726429684d8c279e28bac59549ee2
 
   // ==================== EFFECTS ====================
 
   useEffect(() => {
     const init = async () => {
       try {
-<<<<<<< HEAD
         await Promise.all([fetchDeviceInfo(), fetchAllLogs(), fetchStats()]);
-=======
-        await Promise.all([
-          fetchDeviceInfo(),
-          fetchAllLogs(),
-          fetchStats()
-        ]);
-      } catch (err) {
-        console.error('❌ Erro na inicialização:', err);
->>>>>>> 3f812ddd05f726429684d8c279e28bac59549ee2
       } finally {
         setLoading(false);
       }
@@ -542,23 +373,9 @@ export default function Dashboard() {
     init();
   }, [fetchDeviceInfo, fetchAllLogs, fetchStats]);
 
-<<<<<<< HEAD
   useEffect(() => {
     if (!isPolling || loading) return;
     const interval = setInterval(fetchNewLogs, 2000);
-=======
-    initializeDashboard();
-  }, [fetchDeviceInfo, fetchAllLogs, fetchStats]);
-
-  // Polling em tempo real
-  useEffect(() => {
-    if (!isPolling || loading) return;
-
-    const interval = setInterval(() => {
-      fetchNewLogs();
-    }, 2000);
-
->>>>>>> 3f812ddd05f726429684d8c279e28bac59549ee2
     return () => clearInterval(interval);
   }, [isPolling, loading, fetchNewLogs]);
 
@@ -590,30 +407,18 @@ export default function Dashboard() {
       <div className="flex justify-between items-center mb-6">
         <h1 className="text-3xl font-bold text-gray-800">Dashboard de Acessos</h1>
         <div className="flex items-center gap-4">
-<<<<<<< HEAD
-=======
-          {/* Info do Dispositivo */}
->>>>>>> 3f812ddd05f726429684d8c279e28bac59549ee2
           {deviceInfo && (
             <div className="flex items-center gap-2 px-4 py-2 bg-white rounded-lg shadow-sm border">
               <Cpu className="text-blue-600" size={20} />
               <div className="text-left">
                 <div className="text-xs text-gray-500">Dispositivo</div>
                 <div className="text-sm font-semibold text-gray-800">
-<<<<<<< HEAD
                   {deviceInfo.name} ({deviceInfo.ip})
-=======
-                  ID: {deviceInfo.id} - {deviceInfo.name}
->>>>>>> 3f812ddd05f726429684d8c279e28bac59549ee2
                 </div>
               </div>
             </div>
           )}
           
-<<<<<<< HEAD
-=======
-          {/* Status do dispositivo */}
->>>>>>> 3f812ddd05f726429684d8c279e28bac59549ee2
           <div className="flex items-center gap-2 px-4 py-2 bg-white rounded-lg shadow-sm border">
             <div className={`w-3 h-3 rounded-full ${deviceStatus === 'online' ? 'bg-green-500 animate-pulse' : 'bg-red-500'}`} />
             <span className="text-sm font-medium text-gray-700">
@@ -634,24 +439,7 @@ export default function Dashboard() {
             }`}
           >
             <RefreshCw size={20} className={isPolling ? 'animate-spin' : ''} />
-<<<<<<< HEAD
             {isPolling ? 'Tempo Real ON' : 'Pausado'}
-=======
-            {isPolling ? 'Tempo Real ON' : 'Tempo Real OFF'}
-          </button>
-          
-          {/* Botão de atualizar */}
-          <button
-            onClick={() => {
-              fetchDeviceInfo();
-              fetchAllLogs();
-              fetchStats();
-            }}
-            className="px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors"
-            title="Atualizar dados"
-          >
-            <RefreshCw size={20} />
->>>>>>> 3f812ddd05f726429684d8c279e28bac59549ee2
           </button>
         </div>
       </div>
