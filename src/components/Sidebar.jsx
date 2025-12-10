@@ -69,13 +69,6 @@ export default function Sidebar({ isOpen, onClose, currentPage, setCurrentPage, 
           >
             <Database className="mr-3" size={20} /> Backup
           </button>
-
-          <button
-            onClick={() => setCurrentPage("relatorio")}
-            className={`flex items-center w-full p-3 rounded-lg transition ${currentPage === "relatorio" ? "bg-white bg-opacity-20" : "hover:bg-white hover:bg-opacity-10"}`}
-          >
-            <FileText className="mr-3" size={20} /> Relatório
-          </button>
         </nav>
 
         <button
