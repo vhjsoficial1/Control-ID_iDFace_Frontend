@@ -9,10 +9,7 @@ import {
   Settings,
   RefreshCw,
   FileText,
-  Archive,
-  Calendar,
-  Play,
-  Pause
+  Archive
 } from 'lucide-react';
 import api from '../services/api';
 
@@ -20,6 +17,7 @@ export default function Backup() {
   const [loading, setLoading] = useState(false);
   const [backupInfo, setBackupInfo] = useState(null);
   const [dbStats, setDbStats] = useState(null);
+  // Mantemos o estado básico caso precise reativar, mas removemos a UI
   const [scheduleConfig, setScheduleConfig] = useState({
     intervalHours: 24,
     includeImages: false,
@@ -41,13 +39,7 @@ export default function Backup() {
   useEffect(() => {
     loadDatabaseStats();
     loadBackupInfo();
-    loadSchedulerStatus();
-  }, []);
-
-  useEffect(() => {
-    // Atualizar status do scheduler a cada minuto
-    const interval = setInterval(loadSchedulerStatus, 60000);
-    return () => clearInterval(interval);
+    // loadSchedulerStatus(); // Desativado visualmente, mas pode ser mantido se o backend exigir
   }, []);
 
   const showNotification = (message, type = 'success') => {
@@ -71,30 +63,6 @@ export default function Backup() {
     } catch (error) {
       // Sem backup disponível ainda
       setBackupInfo(null);
-    }
-  };
-
-  const loadSchedulerStatus = async () => {
-    try {
-      const response = await api.get('/backup/scheduler/status');
-      setSchedulerStatus(response.data);
-      
-      if (response.data.enabled) {
-        setScheduleConfig({
-          ...scheduleConfig,
-          enabled: true,
-          nextRun: response.data.nextRun,
-          lastRun: response.data.lastRun
-        });
-      }
-    } catch (error) {
-      console.error('Erro ao carregar status do scheduler:', error);
-      // Scheduler pode não estar implementado ainda
-      setSchedulerStatus({
-        enabled: true,
-        scheduledTime: '08:30',
-        message: 'Backup automático configurado no servidor (08:30 diariamente)'
-      });
     }
   };
 
@@ -259,81 +227,6 @@ export default function Backup() {
     }
   };
 
-  const handleScheduleBackup = async () => {
-    try {
-      setLoading(true);
-      
-      // Se já está habilitado, desabilitar
-      if (scheduleConfig.enabled) {
-        const response = await api.post('/backup/scheduler/disable');
-        if (response.data.success) {
-          showNotification('Backup automático desabilitado', 'success');
-          setScheduleConfig({ ...scheduleConfig, enabled: false, nextRun: null });
-          await loadSchedulerStatus();
-        }
-        return;
-      }
-      
-      // Habilitar com configurações
-      const response = await api.post('/backup/scheduler/enable', {
-        interval_hours: scheduleConfig.intervalHours,
-        include_images: scheduleConfig.includeImages,
-        include_logs: scheduleConfig.includeLogs
-      });
-
-      if (response.data.success) {
-        showNotification(
-          `✅ Backup automático ativado!\nIntervalo: ${scheduleConfig.intervalHours}h\nPróxima execução: ${response.data.nextRun ? new Date(response.data.nextRun).toLocaleString('pt-BR') : 'Calculando...'}`,
-          'success'
-        );
-        setScheduleConfig({ 
-          ...scheduleConfig, 
-          enabled: true,
-          nextRun: response.data.nextRun 
-        });
-        await loadSchedulerStatus();
-      }
-    } catch (error) {
-      console.error('Erro ao configurar backup:', error);
-      showNotification(
-        error.response?.data?.detail || 'Erro ao configurar backup automático',
-        'error'
-      );
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleRunBackupNow = async () => {
-    if (!window.confirm('Deseja executar o backup agendado imediatamente?')) {
-      return;
-    }
-
-    try {
-      setLoading(true);
-      showNotification('Executando backup agendado...', 'info');
-      
-      const response = await api.post('/backup/scheduler/run-now');
-      
-      if (response.data.success) {
-        showNotification(
-          `✅ Backup executado com sucesso!\nTamanho: ${response.data.size_mb || 'N/A'} MB`,
-          'success'
-        );
-        await loadBackupInfo();
-        await loadSchedulerStatus();
-      }
-    } catch (error) {
-      console.error('Erro ao executar backup:', error);
-      showNotification(
-        error.response?.data?.detail || 'Erro ao executar backup',
-        'error'
-      );
-    } finally {
-      setLoading(false);
-    }
-  };
-
   const handleClearBackupCache = async () => {
     if (!window.confirm('Deseja limpar o cache de backup?')) return;
 
@@ -462,12 +355,6 @@ export default function Backup() {
             icon={<Upload size={18} />}
             label="Restaurar"
           />
-          <TabButton
-            active={activeTab === 'schedule'}
-            onClick={() => setActiveTab('schedule')}
-            icon={<Calendar size={18} />}
-            label="Agendamento"
-          />
         </div>
 
         <div className="p-6">
@@ -506,7 +393,7 @@ export default function Backup() {
                 </div>
               )}
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                 <BackupOption
                   title="Backup Rápido"
                   description="Apenas dados essenciais (sem imagens e logs)"
@@ -534,20 +421,6 @@ export default function Backup() {
                   onExecute={() => handleCreateBackup(true, true)}
                   loading={loading}
                 />
-
-                <div className="bg-gray-50 border-2 border-dashed border-gray-300 rounded-lg p-6 flex flex-col items-center justify-center">
-                  <Settings className="text-gray-400 mb-2" size={32} />
-                  <p className="text-gray-600 text-center text-sm">
-                    Backup em Background
-                  </p>
-                  <p className="text-gray-500 text-xs text-center mt-1">
-                    Executado automaticamente às 08:30
-                  </p>
-                  <div className="mt-3 flex items-center gap-2 text-xs text-green-600">
-                    <CheckCircle size={16} />
-                    Configurado
-                  </div>
-                </div>
               </div>
 
               {backupInfo && (
@@ -677,272 +550,6 @@ export default function Backup() {
                     </button>
                   </div>
                 </>
-              )}
-            </div>
-          )}
-
-          {/* Tab: Agendamento */}
-          {activeTab === 'schedule' && (
-            <div className="space-y-6">
-              <h2 className="text-xl font-semibold text-gray-800 mb-4">
-                Backup Automático
-              </h2>
-
-              {/* Status Atual do Scheduler */}
-              <div className={`border-2 rounded-lg p-4 mb-4 ${
-                schedulerStatus?.enabled 
-                  ? 'bg-green-50 border-green-300' 
-                  : 'bg-gray-50 border-gray-300'
-              }`}>
-                <div className="flex items-start justify-between">
-                  <div className="flex items-start flex-1">
-                    <div className={`p-2 rounded-lg mr-3 ${
-                      schedulerStatus?.enabled ? 'bg-green-100' : 'bg-gray-200'
-                    }`}>
-                      <Clock className={
-                        schedulerStatus?.enabled ? 'text-green-600' : 'text-gray-500'
-                      } size={24} />
-                    </div>
-                    <div className="flex-1">
-                      <p className={`font-semibold ${
-                        schedulerStatus?.enabled ? 'text-green-800' : 'text-gray-700'
-                      }`}>
-                        {schedulerStatus?.enabled ? '✅ Backup Automático Ativo' : '⏸️ Backup Automático Inativo'}
-                      </p>
-                      
-                      {schedulerStatus?.enabled && (
-                        <>
-                          <p className="text-sm text-green-700 mt-1">
-                            📅 Horário: {schedulerStatus.scheduledTime || '08:30'} (diariamente)
-                          </p>
-                          
-                          {schedulerStatus.nextRun && (
-                            <p className="text-sm text-green-600 mt-1">
-                              ⏰ Próxima execução: {new Date(schedulerStatus.nextRun).toLocaleString('pt-BR')}
-                            </p>
-                          )}
-                          
-                          {schedulerStatus.lastRun && (
-                            <p className="text-xs text-green-600 mt-1">
-                              ✓ Última execução: {new Date(schedulerStatus.lastRun).toLocaleString('pt-BR')}
-                            </p>
-                          )}
-                          
-                          <p className="text-xs text-green-600 mt-2">
-                            💾 Configuração: {schedulerStatus.includeImages ? 'Com imagens' : 'Sem imagens'} • 
-                            {schedulerStatus.includeLogs ? ' Com logs' : ' Sem logs'} • 
-                            Compactado (ZIP)
-                          </p>
-                        </>
-                      )}
-                      
-                      {!schedulerStatus?.enabled && (
-                        <p className="text-sm text-gray-600 mt-1">
-                          Configure e ative o backup automático abaixo
-                        </p>
-                      )}
-                    </div>
-                  </div>
-                  
-                  {schedulerStatus?.enabled && (
-                    <button
-                      onClick={handleRunBackupNow}
-                      disabled={loading}
-                      className="ml-4 flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition disabled:opacity-50 text-sm"
-                    >
-                      <Play size={16} />
-                      Executar Agora
-                    </button>
-                  )}
-                </div>
-              </div>
-
-              {/* Configurações */}
-              <div className="bg-white border border-gray-200 rounded-lg p-6">
-                <h3 className="font-semibold text-gray-800 mb-4 flex items-center gap-2">
-                  <Settings size={20} />
-                  Configurações do Agendamento
-                </h3>
-
-                <div className="space-y-4">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Intervalo de Execução
-                    </label>
-                    <select
-                      value={scheduleConfig.intervalHours}
-                      onChange={(e) =>
-                        setScheduleConfig({
-                          ...scheduleConfig,
-                          intervalHours: parseInt(e.target.value)
-                        })
-                      }
-                      disabled={scheduleConfig.enabled}
-                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:outline-none disabled:bg-gray-100 disabled:cursor-not-allowed"
-                    >
-                      <option value="1">A cada 1 hora</option>
-                      <option value="6">A cada 6 horas</option>
-                      <option value="12">A cada 12 horas</option>
-                      <option value="24">Diariamente (24 horas)</option>
-                      <option value="48">A cada 2 dias</option>
-                      <option value="168">Semanalmente</option>
-                    </select>
-                    <p className="text-xs text-gray-500 mt-1">
-                      {scheduleConfig.intervalHours === 24 
-                        ? '⏰ Backup será executado todo dia às 08:30 da manhã'
-                        : `⏰ Backup será executado a cada ${scheduleConfig.intervalHours} hora(s)`
-                      }
-                    </p>
-                  </div>
-
-                  <div className="space-y-3 border-t pt-4">
-                    <p className="text-sm font-medium text-gray-700 mb-2">
-                      O que incluir no backup?
-                    </p>
-                    
-                    <label className="flex items-start space-x-3">
-                      <input
-                        type="checkbox"
-                        checked={scheduleConfig.includeLogs}
-                        onChange={(e) =>
-                          setScheduleConfig({
-                            ...scheduleConfig,
-                            includeLogs: e.target.checked
-                          })
-                        }
-                        disabled={scheduleConfig.enabled}
-                        className="mt-1 rounded disabled:cursor-not-allowed"
-                      />
-                      <div>
-                        <p className="font-medium text-gray-700">
-                          📋 Logs de acesso históricos
-                        </p>
-                        <p className="text-xs text-gray-500">
-                          Recomendado: mantém histórico completo de acessos
-                        </p>
-                      </div>
-                    </label>
-
-                    <label className="flex items-start space-x-3">
-                      <input
-                        type="checkbox"
-                        checked={scheduleConfig.includeImages}
-                        onChange={(e) =>
-                          setScheduleConfig({
-                            ...scheduleConfig,
-                            includeImages: e.target.checked
-                          })
-                        }
-                        disabled={scheduleConfig.enabled}
-                        className="mt-1 rounded disabled:cursor-not-allowed"
-                      />
-                      <div>
-                        <p className="font-medium text-gray-700">
-                          🖼️ Fotos dos usuários
-                        </p>
-                        <p className="text-xs text-gray-500">
-                          ⚠️ Aumenta significativamente o tamanho do backup
-                          {dbStats && ` (estimado: +${dbStats.estimated_backup_size_mb} MB)`}
-                        </p>
-                      </div>
-                    </label>
-                  </div>
-
-                  {scheduleConfig.enabled && (
-                    <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3 mt-4">
-                      <p className="text-xs text-yellow-800">
-                        ℹ️ Para alterar as configurações, primeiro desative o agendamento
-                      </p>
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              {/* Botões de Ação */}
-              <div className="flex gap-3">
-                <button
-                  onClick={handleScheduleBackup}
-                  disabled={loading}
-                  className={`flex-1 flex items-center justify-center gap-2 px-6 py-3 rounded-lg font-semibold transition disabled:opacity-50 ${
-                    scheduleConfig.enabled
-                      ? 'bg-red-600 hover:bg-red-700 text-white'
-                      : 'bg-green-600 hover:bg-green-700 text-white'
-                  }`}
-                >
-                  {scheduleConfig.enabled ? (
-                    <>
-                      <Pause size={20} />
-                      Desativar Backup Automático
-                    </>
-                  ) : (
-                    <>
-                      <Play size={20} />
-                      Ativar Backup Automático
-                    </>
-                  )}
-                </button>
-
-                <button
-                  onClick={loadSchedulerStatus}
-                  disabled={loading}
-                  className="px-6 py-3 bg-gray-600 hover:bg-gray-700 text-white rounded-lg font-semibold transition disabled:opacity-50 flex items-center gap-2"
-                >
-                  <RefreshCw size={18} />
-                  Atualizar
-                </button>
-              </div>
-
-              {/* Informações Adicionais */}
-              <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-                <div className="flex items-start">
-                  <AlertCircle className="text-blue-600 mr-3 flex-shrink-0 mt-0.5" size={20} />
-                  <div>
-                    <p className="text-sm text-blue-800 font-semibold mb-2">
-                      ℹ️ Como funciona o backup automático?
-                    </p>
-                    <ul className="text-sm text-blue-700 space-y-1 list-disc list-inside">
-                      <li>O sistema cria backups automaticamente no intervalo configurado</li>
-                      <li>Os backups são compactados em formato ZIP para economizar espaço</li>
-                      <li>Por padrão, executa às 08:30 da manhã (horário de menor uso)</li>
-                      <li>Os backups ficam disponíveis na aba "Criar Backup" para download</li>
-                      <li>Você pode executar backups manualmente a qualquer momento</li>
-                    </ul>
-                  </div>
-                </div>
-              </div>
-
-              {/* Histórico de Backups */}
-              {schedulerStatus?.history && schedulerStatus.history.length > 0 && (
-                <div className="bg-white border border-gray-200 rounded-lg p-6">
-                  <h3 className="font-semibold text-gray-800 mb-4 flex items-center gap-2">
-                    <Archive size={20} />
-                    Histórico de Backups Automáticos
-                  </h3>
-                  
-                  <div className="space-y-2">
-                    {schedulerStatus.history.slice(0, 5).map((backup, index) => (
-                      <div 
-                        key={index}
-                        className="flex items-center justify-between p-3 bg-gray-50 rounded-lg"
-                      >
-                        <div className="flex items-center gap-3">
-                          <CheckCircle className="text-green-600" size={20} />
-                          <div>
-                            <p className="text-sm font-medium text-gray-800">
-                              {new Date(backup.timestamp).toLocaleString('pt-BR')}
-                            </p>
-                            <p className="text-xs text-gray-500">
-                              {backup.size_mb} MB • {backup.duration}s
-                            </p>
-                          </div>
-                        </div>
-                        <span className="text-xs text-green-600 font-semibold">
-                          Sucesso
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
               )}
             </div>
           )}
